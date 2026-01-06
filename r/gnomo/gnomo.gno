@@ -1,6 +1,9 @@
 package gnomo
 
 import (
+	"chain"
+	"chain/banker"
+	"chain/runtime"
 	"strconv"
 	"strings"
 )
@@ -10,24 +13,49 @@ type Pool struct {
 	ID       uint64
 	DenomA   string
 	DenomB   string
-	ReserveA uint64
-	ReserveB uint64
-	TotalLP  uint64
-	FeeBPS   uint64
+	ReserveA int64
+	ReserveB int64
+	TotalLP  int64
+	FeeBPS   int64
 }
 
 var (
 	pools      []*Pool
 	nextPoolID uint64
-	lpBalances map[uint64]map[string]uint64
+	lpBalances map[uint64]map[string]int64
 )
 
 func init() {
-	lpBalances = make(map[uint64]map[string]uint64)
+	lpBalances = make(map[uint64]map[string]int64)
+}
+
+// GetRealmTokenDenom returns the full denom for a realm-issued token
+// e.g., "usdc" -> "/gno.land/r/dev/gnomo:usdc"
+func GetRealmTokenDenom(baseName string) string {
+	return runtime.CurrentRealm().CoinDenom(baseName)
+}
+
+// MintTestTokens mints test tokens to the caller (for testing only)
+// This allows testing the DEX without needing external tokens
+func MintTestTokens(_ realm, baseName string, amount int64) string {
+	if amount <= 0 {
+		panic("amount must be positive")
+	}
+	if baseName == "" {
+		panic("baseName required")
+	}
+
+	caller := runtime.OriginCaller()
+	bnk := banker.NewBanker(banker.BankerTypeRealmIssue)
+	
+	denom := runtime.CurrentRealm().CoinDenom(baseName)
+	bnk.IssueCoin(caller, denom, amount)
+	
+	return denom
 }
 
 // CreatePool creates a new liquidity pool
-func CreatePool(_ realm, denomA, denomB string, feeBPS uint64) uint64 {
+func CreatePool(_ realm, denomA, denomB string, feeBPS int64) uint64 {
 	if denomA == "" || denomB == "" {
 		panic("invalid denom")
 	}
@@ -56,95 +84,97 @@ func CreatePool(_ realm, denomA, denomB string, feeBPS uint64) uint64 {
 		FeeBPS: feeBPS,
 	}
 	pools = append(pools, pool)
-	lpBalances[nextPoolID] = make(map[string]uint64)
+	lpBalances[nextPoolID] = make(map[string]int64)
 	nextPoolID++
 	return pool.ID
 }
 
-// AddLiquidity adds liquidity to a pool and mints LP tokens
-// For demo: caller provides amounts, we mint LP shares
-// In production: would use Banker to receive actual coins
-func AddLiquidity(_ realm, poolID uint64, amountA, amountB uint64, caller string) uint64 {
+// AddLiquidity adds liquidity to a pool
+// User must send both tokens with the transaction
+func AddLiquidity(_ realm, poolID uint64) int64 {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
 	}
-	if amountA == 0 || amountB == 0 {
-		panic("amounts must be positive")
-	}
-	if caller == "" {
-		panic("caller required")
-	}
 
 	p := pools[poolID]
-	var lpMinted uint64
+	caller := string(runtime.OriginCaller())
+	
+	sentCoins := banker.OriginSend()
+	amountA := sentCoins.AmountOf(p.DenomA)
+	amountB := sentCoins.AmountOf(p.DenomB)
+
+	if amountA <= 0 || amountB <= 0 {
+		panic("must send both tokens: " + p.DenomA + " and " + p.DenomB)
+	}
+
+	var lpMinted int64
 
 	if p.TotalLP == 0 {
-		// First liquidity: LP = sqrt(amountA * amountB)
-		lpMinted = sqrt(amountA * amountB)
+		lpMinted = sqrt64(amountA * amountB)
 		if lpMinted == 0 {
 			panic("insufficient initial liquidity")
 		}
 	} else {
-		// Subsequent: mint proportional to contribution
-		// LP = min(amountA * totalLP / reserveA, amountB * totalLP / reserveB)
 		lpFromA := (amountA * p.TotalLP) / p.ReserveA
 		lpFromB := (amountB * p.TotalLP) / p.ReserveB
-		lpMinted = min(lpFromA, lpFromB)
+		lpMinted = min64(lpFromA, lpFromB)
 		if lpMinted == 0 {
 			panic("insufficient liquidity minted")
 		}
 	}
 
-	// Update reserves
 	p.ReserveA += amountA
 	p.ReserveB += amountB
 	p.TotalLP += lpMinted
-
-	// Credit LP to caller
 	lpBalances[poolID][caller] += lpMinted
 
 	return lpMinted
 }
 
 // RemoveLiquidity burns LP tokens and returns proportional reserves
-func RemoveLiquidity(_ realm, poolID uint64, lpAmount uint64, caller string) (uint64, uint64) {
+func RemoveLiquidity(_ realm, poolID uint64, lpAmount int64) {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
 	}
-	if lpAmount == 0 {
+	if lpAmount <= 0 {
 		panic("amount must be positive")
-	}
-	if caller == "" {
-		panic("caller required")
 	}
 
 	p := pools[poolID]
+	caller := string(runtime.OriginCaller())
 	callerLP := lpBalances[poolID][caller]
+	
 	if callerLP < lpAmount {
 		panic("insufficient LP balance")
 	}
 
-	// Calculate proportional amounts
 	amountA := (lpAmount * p.ReserveA) / p.TotalLP
 	amountB := (lpAmount * p.ReserveB) / p.TotalLP
 
-	// Update state
+	if amountA <= 0 || amountB <= 0 {
+		panic("insufficient output amounts")
+	}
+
 	p.ReserveA -= amountA
 	p.ReserveB -= amountB
 	p.TotalLP -= lpAmount
 	lpBalances[poolID][caller] -= lpAmount
 
-	return amountA, amountB
+	bnk := banker.NewBanker(banker.BankerTypeRealmSend)
+	realmAddr := runtime.CurrentRealm().Address()
+	callerAddr := runtime.OriginCaller()
+
+	coins := chain.NewCoins(
+		chain.NewCoin(p.DenomA, amountA),
+		chain.NewCoin(p.DenomB, amountB),
+	)
+	bnk.SendCoins(realmAddr, callerAddr, coins)
 }
 
-// SwapExactIn swaps exact input amount for output
-// tokenIn: "A" or "B" to indicate which token is being sold
-func SwapExactIn(_ realm, poolID uint64, tokenIn string, amountIn uint64) uint64 {
+// Swap swaps exact input amount for output
+func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
-	}
-	if amountIn == 0 {
-		panic("amount must be positive")
 	}
 	if tokenIn != "A" && tokenIn != "B" {
 		panic("tokenIn must be A or B")
@@ -155,31 +185,55 @@ func SwapExactIn(_ realm, poolID uint64, tokenIn string, amountIn uint64) uint64
 		panic("pool has no liquidity")
 	}
 
-	var amountOut uint64
-	// Apply fee: amountInWithFee = amountIn * (10000 - feeBPS) / 10000
+	caller := runtime.OriginCaller()
+	sentCoins := banker.OriginSend()
+
+	var amountIn int64
+	var denomOut string
+	
+	if tokenIn == "A" {
+		denomOut = p.DenomB
+		amountIn = sentCoins.AmountOf(p.DenomA)
+	} else {
+		denomOut = p.DenomA
+		amountIn = sentCoins.AmountOf(p.DenomB)
+	}
+
+	if amountIn <= 0 {
+		panic("must send input token")
+	}
+
+	var amountOut int64
 	amountInWithFee := (amountIn * (10000 - p.FeeBPS)) / 10000
 
 	if tokenIn == "A" {
-		// Selling A for B: amountOut = (amountInWithFee * reserveB) / (reserveA + amountInWithFee)
 		amountOut = (amountInWithFee * p.ReserveB) / (p.ReserveA + amountInWithFee)
 		p.ReserveA += amountIn
 		p.ReserveB -= amountOut
 	} else {
-		// Selling B for A
 		amountOut = (amountInWithFee * p.ReserveA) / (p.ReserveB + amountInWithFee)
 		p.ReserveB += amountIn
 		p.ReserveA -= amountOut
 	}
 
-	if amountOut == 0 {
+	if amountOut <= 0 {
 		panic("insufficient output amount")
 	}
+	if amountOut < minAmountOut {
+		panic("slippage: output " + strconv.FormatInt(amountOut, 10) + " < min " + strconv.FormatInt(minAmountOut, 10))
+	}
+
+	bnk := banker.NewBanker(banker.BankerTypeRealmSend)
+	realmAddr := runtime.CurrentRealm().Address()
+	
+	outCoins := chain.NewCoins(chain.NewCoin(denomOut, amountOut))
+	bnk.SendCoins(realmAddr, caller, outCoins)
 
 	return amountOut
 }
 
 // GetQuote returns expected output without executing swap
-func GetQuote(poolID uint64, tokenIn string, amountIn uint64) uint64 {
+func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
 	}
@@ -197,7 +251,7 @@ func GetQuote(poolID uint64, tokenIn string, amountIn uint64) uint64 {
 }
 
 // GetPool returns pool info
-func GetPool(poolID uint64) (string, string, uint64, uint64, uint64, uint64) {
+func GetPool(poolID uint64) (string, string, int64, int64, int64, int64) {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
 	}
@@ -205,22 +259,24 @@ func GetPool(poolID uint64) (string, string, uint64, uint64, uint64, uint64) {
 	return p.DenomA, p.DenomB, p.ReserveA, p.ReserveB, p.TotalLP, p.FeeBPS
 }
 
-// GetPoolCount returns number of pools
 func GetPoolCount() uint64 {
 	return uint64(len(pools))
 }
 
-// GetLPBalance returns LP balance for an address
-func GetLPBalance(poolID uint64, addr string) uint64 {
+func GetLPBalance(poolID uint64, addr string) int64 {
 	if poolID >= uint64(len(pools)) {
 		return 0
 	}
 	return lpBalances[poolID][addr]
 }
 
+func GetRealmAddress() string {
+	return string(runtime.CurrentRealm().Address())
+}
+
 // Helper functions
-func sqrt(x uint64) uint64 {
-	if x == 0 {
+func sqrt64(x int64) int64 {
+	if x <= 0 {
 		return 0
 	}
 	z := x
@@ -232,7 +288,7 @@ func sqrt(x uint64) uint64 {
 	return z
 }
 
-func min(a, b uint64) uint64 {
+func min64(a, b int64) int64 {
 	if a < b {
 		return a
 	}
@@ -243,54 +299,66 @@ func min(a, b uint64) uint64 {
 func Render(path string) string {
 	var sb strings.Builder
 	sb.WriteString("# Gnomo DEX\n\n")
+	sb.WriteString("**Contract Address:** `" + string(runtime.CurrentRealm().Address()) + "`\n\n")
+
+	// Show test token denom
+	testDenom := runtime.CurrentRealm().CoinDenom("usdc")
+	sb.WriteString("**Test Token (usdc):** `" + testDenom + "`\n\n")
 
 	if len(pools) == 0 {
-		sb.WriteString("No pools created yet.\n")
-		return sb.String()
-	}
+		sb.WriteString("No pools created yet.\n\n")
+	} else {
+		sb.WriteString("## Pools\n\n")
+		for _, p := range pools {
+			sb.WriteString("### Pool " + strconv.FormatUint(p.ID, 10) + ": " + p.DenomA + " / " + p.DenomB + "\n\n")
+			sb.WriteString("| Metric | Value |\n")
+			sb.WriteString("|--------|-------|\n")
+			sb.WriteString("| Reserve A | " + strconv.FormatInt(p.ReserveA, 10) + " |\n")
+			sb.WriteString("| Reserve B | " + strconv.FormatInt(p.ReserveB, 10) + " |\n")
+			sb.WriteString("| Total LP | " + strconv.FormatInt(p.TotalLP, 10) + " |\n")
+			sb.WriteString("| Fee | " + strconv.FormatInt(p.FeeBPS, 10) + " bps |\n")
 
-	sb.WriteString("## Pools\n\n")
-	for _, p := range pools {
-		sb.WriteString("### Pool " + strconv.FormatUint(p.ID, 10) + ": " + p.DenomA + "/" + p.DenomB + "\n\n")
-		sb.WriteString("| Metric | Value |\n")
-		sb.WriteString("|--------|-------|\n")
-		sb.WriteString("| Reserve " + p.DenomA + " | " + strconv.FormatUint(p.ReserveA, 10) + " |\n")
-		sb.WriteString("| Reserve " + p.DenomB + " | " + strconv.FormatUint(p.ReserveB, 10) + " |\n")
-		sb.WriteString("| Total LP | " + strconv.FormatUint(p.TotalLP, 10) + " |\n")
-		sb.WriteString("| Fee | " + strconv.FormatUint(p.FeeBPS, 10) + " bps |\n")
-
-		if p.ReserveA > 0 && p.ReserveB > 0 {
-			// Price with 6 decimal precision
-			priceAtoB := (p.ReserveB * 1000000) / p.ReserveA
-			priceBtoA := (p.ReserveA * 1000000) / p.ReserveB
-			sb.WriteString("| Price (1 " + p.DenomA + ") | " + formatPrice(priceAtoB) + " " + p.DenomB + " |\n")
-			sb.WriteString("| Price (1 " + p.DenomB + ") | " + formatPrice(priceBtoA) + " " + p.DenomA + " |\n")
+			if p.ReserveA > 0 && p.ReserveB > 0 {
+				priceAtoB := (p.ReserveB * 1000000) / p.ReserveA
+				priceBtoA := (p.ReserveA * 1000000) / p.ReserveB
+				sb.WriteString("| Price A→B | " + formatPrice(priceAtoB) + " |\n")
+				sb.WriteString("| Price B→A | " + formatPrice(priceBtoA) + " |\n")
+			}
+			sb.WriteString("\n")
 		}
-		sb.WriteString("\n")
 	}
 
-	sb.WriteString("## Functions\n\n")
-	sb.WriteString("- `CreatePool(denomA, denomB, feeBPS)` - Create new pool\n")
-	sb.WriteString("- `AddLiquidity(poolID, amountA, amountB, caller)` - Add liquidity\n")
-	sb.WriteString("- `RemoveLiquidity(poolID, lpAmount, caller)` - Remove liquidity\n")
-	sb.WriteString("- `SwapExactIn(poolID, tokenIn, amountIn)` - Swap tokens (tokenIn: \"A\" or \"B\")\n")
-	sb.WriteString("- `GetQuote(poolID, tokenIn, amountIn)` - Get swap quote\n")
+	sb.WriteString("## Quick Start\n\n")
+	sb.WriteString("### 1. Get Test Tokens\n")
+	sb.WriteString("```\n")
+	sb.WriteString("gnokey maketx call -func MintTestTokens -args \"usdc\" -args \"10000000\" ...\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("### 2. Create Pool (ugnot + test usdc)\n")
+	sb.WriteString("```\n")
+	sb.WriteString("gnokey maketx call -func CreatePool -args \"ugnot\" -args \"" + testDenom + "\" -args \"30\" ...\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("### 3. Add Liquidity\n")
+	sb.WriteString("```\n")
+	sb.WriteString("gnokey maketx call -send \"1000000ugnot,2000000" + testDenom + "\" -func AddLiquidity -args \"0\" ...\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("### 4. Swap\n")
+	sb.WriteString("```\n")
+	sb.WriteString("gnokey maketx call -send \"100000ugnot\" -func Swap -args \"0\" -args \"A\" -args \"0\" ...\n")
+	sb.WriteString("```\n\n")
 
 	return sb.String()
 }
 
-func formatPrice(microPrice uint64) string {
+func formatPrice(microPrice int64) string {
 	whole := microPrice / 1000000
 	frac := microPrice % 1000000
 	if frac == 0 {
-		return strconv.FormatUint(whole, 10)
+		return strconv.FormatInt(whole, 10)
 	}
-	fracStr := strconv.FormatUint(frac, 10)
-	// Pad with leading zeros
+	fracStr := strconv.FormatInt(frac, 10)
 	for len(fracStr) < 6 {
 		fracStr = "0" + fracStr
 	}
-	// Trim trailing zeros
 	fracStr = strings.TrimRight(fracStr, "0")
-	return strconv.FormatUint(whole, 10) + "." + fracStr
+	return strconv.FormatInt(whole, 10) + "." + fracStr
 }
