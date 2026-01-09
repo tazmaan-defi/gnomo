@@ -10,6 +10,7 @@ import {
   swap as adenaSwap,
   addLiquidity as adenaAddLiquidity,
   removeLiquidity as adenaRemoveLiquidity,
+  createPool as adenaCreatePool,
   getBalances
 } from '@/lib/adena'
 
@@ -589,13 +590,18 @@ function PoolTab({
   lpBalances: Map<number, bigint>
   onRefresh: () => Promise<void>
 }) {
-  const [activePoolTab, setActivePoolTab] = useState<'list' | 'add' | 'remove'>('list')
+  const [activePoolTab, setActivePoolTab] = useState<'list' | 'add' | 'remove' | 'create'>('list')
   const [selectedPoolId, setSelectedPoolId] = useState<number>(pools[0]?.id ?? 0)
   const [amountA, setAmountA] = useState('')
   const [amountB, setAmountB] = useState('')
   const [lpAmount, setLpAmount] = useState('')
   const [selectedPercent, setSelectedPercent] = useState<number | null>(null)
   const [actionLoading, setActionLoading] = useState(false)
+  
+  // Create pool state
+  const [newTokenA, setNewTokenA] = useState('ugnot')
+  const [newTokenB, setNewTokenB] = useState('')
+  const [newFeeBps, setNewFeeBps] = useState(30)
 
   const selectedPool = pools.find(p => p.id === selectedPoolId) || pools[0]
   const userLpBalance = lpBalances.get(selectedPoolId) || 0n
@@ -755,6 +761,16 @@ function PoolTab({
         >
           Remove
         </button>
+        <button
+          onClick={() => setActivePoolTab('create')}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition ${
+            activePoolTab === 'create'
+              ? 'bg-[#238636] text-white'
+              : 'bg-[#21262d] text-[#8b949e] hover:text-white'
+          }`}
+        >
+          Create
+        </button>
       </div>
 
       {activePoolTab === 'list' && (
@@ -762,7 +778,7 @@ function PoolTab({
           {pools.length === 0 ? (
             <div className="text-center py-12 text-[#8b949e]">
               <p className="mb-2">No pools found</p>
-              <p className="text-sm">Create a pool using gnokey</p>
+              <p className="text-sm">Use the Create tab to create a new pool</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -1139,6 +1155,140 @@ function PoolTab({
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {activePoolTab === 'create' && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold">Create New Pool</h3>
+          
+          <div className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d]">
+            <p className="text-sm text-[#8b949e] mb-4">
+              Create a new liquidity pool by specifying two tokens and a fee tier.
+              After creating the pool, you'll need to add initial liquidity.
+            </p>
+            
+            {/* Token A */}
+            <div className="mb-4">
+              <label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label>
+              <select
+                value={newTokenA}
+                onChange={(e) => setNewTokenA(e.target.value)}
+                className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white"
+              >
+                <option value="ugnot">GNOT (ugnot)</option>
+              </select>
+              <p className="text-xs text-[#8b949e] mt-1">Native token is recommended as base</p>
+            </div>
+            
+            {/* Token B */}
+            <div className="mb-4">
+              <label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label>
+              <input
+                type="text"
+                value={newTokenB}
+                onChange={(e) => setNewTokenB(e.target.value)}
+                placeholder="/gno.land/r/dev/gnomo:usdc"
+                className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]"
+              />
+              <p className="text-xs text-[#8b949e] mt-1">Full realm token path (e.g., /gno.land/r/dev/gnomo:tokenname)</p>
+            </div>
+            
+            {/* Fee Tier */}
+            <div className="mb-4">
+              <label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label>
+              <div className="flex gap-2">
+                {[10, 30, 100].map((fee) => (
+                  <button
+                    key={fee}
+                    onClick={() => setNewFeeBps(fee)}
+                    className={`flex-1 py-3 rounded-xl text-sm font-medium transition ${
+                      newFeeBps === fee
+                        ? 'bg-[#238636] text-white'
+                        : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'
+                    }`}
+                  >
+                    {fee / 100}%
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-[#8b949e] mt-2">
+                {newFeeBps === 10 && 'Best for stable pairs (e.g., USDC/USDT)'}
+                {newFeeBps === 30 && 'Best for most pairs (standard)'}
+                {newFeeBps === 100 && 'Best for exotic pairs (higher volatility)'}
+              </p>
+            </div>
+          </div>
+
+          {/* Pool Preview */}
+          {newTokenB && (
+            <div className="p-3 bg-[#0d1117] rounded-xl text-sm">
+              <p className="text-[#8b949e] mb-2">Pool Preview:</p>
+              <div className="flex justify-between text-white">
+                <span>Pair</span>
+                <span>GNOT / {newTokenB.split(':').pop()?.toUpperCase() || 'TOKEN'}</span>
+              </div>
+              <div className="flex justify-between text-white mt-1">
+                <span>Fee</span>
+                <span>{newFeeBps / 100}%</span>
+              </div>
+            </div>
+          )}
+
+          {/* Create Button */}
+          <button
+            onClick={async () => {
+              if (!walletAddress || !newTokenB) return
+              
+              setActionLoading(true)
+              try {
+                const result = await adenaCreatePool({
+                  caller: walletAddress,
+                  denomA: newTokenA,
+                  denomB: newTokenB,
+                  feeBps: newFeeBps,
+                })
+
+                if (result.code === 0) {
+                  alert('Pool created successfully! Now add initial liquidity.')
+                  setNewTokenB('')
+                  setActivePoolTab('add')
+                  await onRefresh()
+                } else if (result.code === 4001 || result.code === 4000) {
+                  console.log('Transaction timed out or cancelled')
+                } else {
+                  alert(`Failed: ${result.message || 'Unknown error'}`)
+                }
+              } catch (error) {
+                console.error('Create pool error:', error)
+                const msg = error instanceof Error ? error.message : ''
+                if (!msg.includes('rejected') && !msg.includes('timed out')) {
+                  alert(msg || 'Failed to create pool')
+                }
+              } finally {
+                setActionLoading(false)
+              }
+            }}
+            disabled={!walletAddress || !newTokenB || actionLoading}
+            className={`w-full py-4 rounded-xl font-semibold text-lg transition ${
+              walletAddress && newTokenB && !actionLoading
+                ? 'bg-[#238636] hover:bg-[#2ea043] text-white'
+                : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'
+            }`}
+          >
+            {actionLoading ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
+                Creating...
+              </span>
+            ) : !walletAddress ? (
+              'Connect Wallet'
+            ) : !newTokenB ? (
+              'Enter Token B'
+            ) : (
+              'Create Pool'
+            )}
+          </button>
         </div>
       )}
     </div>
