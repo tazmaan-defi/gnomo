@@ -11,6 +11,7 @@ import {
   addLiquidity as adenaAddLiquidity,
   removeLiquidity as adenaRemoveLiquidity,
   createPool as adenaCreatePool,
+  mintTestTokens as adenaMintTokens,
   getBalances
 } from '@/lib/adena'
 
@@ -602,6 +603,10 @@ function PoolTab({
   const [newTokenA, setNewTokenA] = useState('ugnot')
   const [newTokenB, setNewTokenB] = useState('')
   const [newFeeBps, setNewFeeBps] = useState(30)
+  
+  // Mint tokens state (dev only)
+  const [mintTokenName, setMintTokenName] = useState('')
+  const [mintAmount, setMintAmount] = useState('1000000')
 
   const selectedPool = pools.find(p => p.id === selectedPoolId) || pools[0]
   const userLpBalance = lpBalances.get(selectedPoolId) || 0n
@@ -1198,7 +1203,7 @@ function PoolTab({
             <div className="mb-4">
               <label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label>
               <div className="flex gap-2">
-                {[10, 30, 100].map((fee) => (
+                {[30, 50, 100].map((fee) => (
                   <button
                     key={fee}
                     onClick={() => setNewFeeBps(fee)}
@@ -1208,14 +1213,12 @@ function PoolTab({
                         : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'
                     }`}
                   >
-                    {fee / 100}%
+                    {(fee / 100).toFixed(1)}%
                   </button>
                 ))}
               </div>
               <p className="text-xs text-[#8b949e] mt-2">
-                {newFeeBps === 10 && 'Best for stable pairs (e.g., USDC/USDT)'}
-                {newFeeBps === 30 && 'Best for most pairs (standard)'}
-                {newFeeBps === 100 && 'Best for exotic pairs (higher volatility)'}
+                0.3% is standard for most V2 pools
               </p>
             </div>
           </div>
@@ -1289,6 +1292,58 @@ function PoolTab({
               'Create Pool'
             )}
           </button>
+
+          {/* Dev Tools - Mint Test Tokens */}
+          <div className="mt-6 p-4 bg-[#0d1117] rounded-xl border border-dashed border-[#30363d]">
+            <p className="text-sm text-[#f0883e] mb-3">🔧 Dev Tools - Mint Test Tokens</p>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={mintTokenName}
+                onChange={(e) => setMintTokenName(e.target.value.toLowerCase())}
+                placeholder="token name (e.g., dai)"
+                className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm placeholder-[#484f58]"
+              />
+              <input
+                type="text"
+                value={mintAmount}
+                onChange={(e) => setMintAmount(e.target.value)}
+                placeholder="amount"
+                className="w-28 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm"
+              />
+            </div>
+            <button
+              onClick={async () => {
+                if (!walletAddress || !mintTokenName) return
+                setActionLoading(true)
+                try {
+                  const result = await adenaMintTokens({
+                    caller: walletAddress,
+                    baseName: mintTokenName,
+                    amount: BigInt(mintAmount),
+                  })
+                  if (result.code === 0) {
+                    alert(`Minted ${mintAmount} ${mintTokenName.toUpperCase()}! Token path: /gno.land/r/dev/gnomo:${mintTokenName}`)
+                    setMintTokenName('')
+                    await onRefresh()
+                  } else if (result.code !== 4001 && result.code !== 4000) {
+                    alert(`Failed: ${result.message}`)
+                  }
+                } catch (e) {
+                  console.error('Mint error:', e)
+                } finally {
+                  setActionLoading(false)
+                }
+              }}
+              disabled={!walletAddress || !mintTokenName || actionLoading}
+              className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition"
+            >
+              Mint Tokens
+            </button>
+            <p className="text-xs text-[#8b949e] mt-2">
+              Creates new test tokens. Use the token path shown after minting to create a pool.
+            </p>
+          </div>
         </div>
       )}
     </div>
