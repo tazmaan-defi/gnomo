@@ -66,7 +66,7 @@ func CreatePool(_ realm, denomA, denomB string, feeBPS int64) uint64 {
 		denomA, denomB = denomB, denomA
 	}
 	for _, p := range pools {
-		if p.DenomA == denomA && p.DenomB == denomB {
+		if p.DenomA == denomA && p.DenomB == denomB && p.FeeBPS == feeBPS {
 			panic("pool already exists")
 		}
 	}

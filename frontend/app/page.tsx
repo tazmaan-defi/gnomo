@@ -15,16 +15,28 @@ import {
   getBalances
 } from '@/lib/adena'
 
+// Auto-routing result type
+type BestQuoteResult = {
+  pool: PoolInfo
+  amountOut: bigint
+  tokenIn: 'A' | 'B'
+}
+
 export default function Home() {
   const [activeTab, setActiveTab] = useState<'swap' | 'pool'>('swap')
   const [pools, setPools] = useState<PoolInfo[]>([])
-  const [selectedPool, setSelectedPool] = useState<PoolInfo | null>(null)
-  const [fromAmount, setFromAmount] = useState('')
-  const [toAmount, setToAmount] = useState('')
-  const [tokenIn, setTokenIn] = useState<'A' | 'B'>('B')
   const [loading, setLoading] = useState(true)
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [swapLoading, setSwapLoading] = useState(false)
+  
+  // Token-based selection (for auto-routing)
+  const [fromToken, setFromToken] = useState<string>('')
+  const [toToken, setToToken] = useState<string>('')
+  const [fromAmount, setFromAmount] = useState('')
+  const [toAmount, setToAmount] = useState('')
+  
+  // Best quote from auto-routing
+  const [bestQuote, setBestQuote] = useState<BestQuoteResult | null>(null)
   
   // Wallet state
   const [walletAddress, setWalletAddress] = useState<string | null>(null)
@@ -36,6 +48,28 @@ export default function Home() {
   // Slippage
   const [slippageBps, setSlippageBps] = useState(50)
   const [showSettings, setShowSettings] = useState(false)
+
+  // Get unique tokens from all pools
+  const availableTokens = useCallback(() => {
+    const tokens = new Set<string>()
+    pools.forEach(pool => {
+      tokens.add(pool.denomA)
+      tokens.add(pool.denomB)
+    })
+    return Array.from(tokens)
+  }, [pools])
+
+  // Find ALL pools for a token pair (different fee tiers)
+  const findPoolsForPair = useCallback((tokenA: string, tokenB: string): PoolInfo[] => {
+    if (!tokenA || !tokenB) return []
+    return pools.filter(p => 
+      (p.denomA === tokenA && p.denomB === tokenB) ||
+      (p.denomA === tokenB && p.denomB === tokenA)
+    )
+  }, [pools])
+
+  // Get matching pools for current selection
+  const matchingPools = findPoolsForPair(fromToken, toToken)
 
   // Check for Adena on mount
   useEffect(() => {
@@ -55,7 +89,6 @@ export default function Home() {
           const account = await getAdenaAccount()
           if (account?.address) {
             setWalletAddress(account.address)
-            // Fetch balances immediately
             const b = await getBalances()
             setBalances(b)
           }
@@ -65,7 +98,6 @@ export default function Home() {
       }
     }
     tryReconnect()
-    // No periodic check - user can click Connect button
   }, [adenaAvailable]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch balances when wallet connects
@@ -73,10 +105,8 @@ export default function Home() {
     const fetchBalances = async () => {
       if (walletAddress) {
         try {
-          // Check if wallet is still accessible
           const account = await getAdenaAccount()
           if (!account?.address) {
-            // Wallet locked - disconnect
             setWalletAddress(null)
             setBalances(new Map())
             setLpBalances(new Map())
@@ -86,7 +116,6 @@ export default function Home() {
           setBalances(b)
         } catch (e) {
           console.error('Failed to fetch balances:', e)
-          // Wallet might be locked
           setWalletAddress(null)
           setBalances(new Map())
           setLpBalances(new Map())
@@ -125,14 +154,16 @@ export default function Home() {
     return () => clearInterval(interval)
   }, [walletAddress, pools])
 
-  // Fetch pools on load
+  // Fetch pools on load and set default tokens
   useEffect(() => {
     const fetchPools = async () => {
       try {
         const poolData = await getAllPools()
         setPools(poolData)
-        if (poolData.length > 0 && !selectedPool) {
-          setSelectedPool(poolData[0])
+        // Set default tokens from first pool
+        if (poolData.length > 0 && !fromToken && !toToken) {
+          setFromToken(poolData[0].denomB) // Usually native token
+          setToToken(poolData[0].denomA)
         }
       } catch (error) {
         console.error('Failed to fetch pools:', error)
@@ -143,28 +174,61 @@ export default function Home() {
     fetchPools()
     const interval = setInterval(fetchPools, 60000)
     return () => clearInterval(interval)
-  }, [selectedPool])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Get quote when amount changes
+  // AUTO-ROUTING: Get best quote across all matching pools
   const updateQuote = useCallback(async () => {
-    if (!selectedPool || !fromAmount || parseFloat(fromAmount) <= 0) {
+    if (!fromToken || !toToken || !fromAmount || parseFloat(fromAmount) <= 0) {
       setToAmount('')
+      setBestQuote(null)
+      return
+    }
+    
+    const matching = findPoolsForPair(fromToken, toToken)
+    if (matching.length === 0) {
+      setToAmount('')
+      setBestQuote(null)
       return
     }
 
     setQuoteLoading(true)
     try {
       const amountIn = BigInt(Math.floor(parseFloat(fromAmount) * 1_000_000))
-      const quote = await getQuote(selectedPool.id, tokenIn, amountIn)
-      const denomOut = tokenIn === 'A' ? selectedPool.denomB : selectedPool.denomA
-      setToAmount(formatAmount(quote, denomOut))
+      
+      let best: BestQuoteResult | null = null
+      
+      // Get quotes from ALL matching pools and pick the best
+      for (const pool of matching) {
+        if (pool.reserveA === 0n || pool.reserveB === 0n) continue
+        
+        const tokenIn: 'A' | 'B' = pool.denomA === fromToken ? 'A' : 'B'
+        
+        try {
+          const quote = await getQuote(pool.id, tokenIn, amountIn)
+          
+          if (quote > 0n && (!best || quote > best.amountOut)) {
+            best = { pool, amountOut: quote, tokenIn }
+          }
+        } catch (e) {
+          console.error(`Quote error for pool ${pool.id}:`, e)
+        }
+      }
+      
+      if (best) {
+        setBestQuote(best)
+        setToAmount(formatAmount(best.amountOut, toToken))
+      } else {
+        setBestQuote(null)
+        setToAmount('')
+      }
     } catch (error) {
       console.error('Quote error:', error)
+      setBestQuote(null)
       setToAmount('')
     } finally {
       setQuoteLoading(false)
     }
-  }, [selectedPool, fromAmount, tokenIn])
+  }, [fromToken, toToken, fromAmount, findPoolsForPair])
 
   useEffect(() => {
     const debounce = setTimeout(updateQuote, 300)
@@ -172,9 +236,12 @@ export default function Home() {
   }, [updateQuote])
 
   const handleSwapDirection = () => {
-    setTokenIn(tokenIn === 'A' ? 'B' : 'A')
+    const tempToken = fromToken
+    setFromToken(toToken)
+    setToToken(tempToken)
     setFromAmount(toAmount)
     setToAmount(fromAmount)
+    setBestQuote(null)
   }
 
   const handleConnectWallet = async () => {
@@ -192,20 +259,16 @@ export default function Home() {
 
     setWalletConnecting(true)
     try {
-      // Connect first (this will prompt for password if locked)
       const address = await connectAdena()
       if (address) {
         setWalletAddress(address)
-        // Only switch network after successfully connected
         await switchToDevNetwork()
-        // Fetch balances immediately after connect
         const b = await getBalances()
         setBalances(b)
       }
     } catch (error: any) {
       console.error('Wallet connection error:', error)
       const msg = error?.message?.toLowerCase() || ''
-      // If already connected, just get the account
       if (msg.includes('already connected')) {
         try {
           const account = await getAdenaAccount()
@@ -226,19 +289,19 @@ export default function Home() {
   }
 
   const handleSwap = async () => {
-    if (!walletAddress || !selectedPool || !fromAmount || !toAmount) return
+    if (!walletAddress || !bestQuote || !fromAmount || !toAmount) return
 
     setSwapLoading(true)
     try {
       const amountIn = BigInt(Math.floor(parseFloat(fromAmount) * 1_000_000))
       const expectedOut = BigInt(Math.floor(parseFloat(toAmount) * 1_000_000))
       const minAmountOut = expectedOut - (expectedOut * BigInt(slippageBps) / 10000n)
-      const denomIn = tokenIn === 'A' ? selectedPool.denomA : selectedPool.denomB
+      const denomIn = bestQuote.tokenIn === 'A' ? bestQuote.pool.denomA : bestQuote.pool.denomB
 
       const result = await adenaSwap({
         caller: walletAddress,
-        poolId: selectedPool.id,
-        tokenIn,
+        poolId: bestQuote.pool.id,
+        tokenIn: bestQuote.tokenIn,
         amountIn,
         minAmountOut,
         denomIn,
@@ -248,9 +311,9 @@ export default function Home() {
         alert('Swap successful!')
         setFromAmount('')
         setToAmount('')
+        setBestQuote(null)
         await refreshData()
       } else if (result.code === 4001 || result.code === 4000) {
-        // Transaction timed out or was cancelled - silent
         console.log('Transaction timed out or cancelled')
       } else {
         alert(`Swap failed: ${result.message || 'Unknown error'}`)
@@ -269,10 +332,6 @@ export default function Home() {
   const refreshData = async () => {
     const poolData = await getAllPools()
     setPools(poolData)
-    if (selectedPool) {
-      const updated = poolData.find(p => p.id === selectedPool.id)
-      if (updated) setSelectedPool(updated)
-    }
     if (walletAddress) {
       const b = await getBalances()
       setBalances(b)
@@ -290,9 +349,6 @@ export default function Home() {
       setLpBalances(newLpBalances)
     }
   }
-
-  const fromToken = selectedPool ? (tokenIn === 'A' ? selectedPool.denomA : selectedPool.denomB) : ''
-  const toToken = selectedPool ? (tokenIn === 'A' ? selectedPool.denomB : selectedPool.denomA) : ''
 
   const totalTVL = pools.reduce((acc, pool) => {
     return acc + Number(pool.reserveA) + Number(pool.reserveB)
@@ -368,19 +424,12 @@ export default function Home() {
           <div className="bg-[#161b22] rounded-2xl p-4 border border-[#30363d]">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold">Swap</h2>
-              <div className="flex items-center gap-2">
-                {selectedPool && (
-                  <div className="text-xs text-[#8b949e]">
-                    Pool: {formatDenom(selectedPool.denomA)}/{formatDenom(selectedPool.denomB)}
-                  </div>
-                )}
-                <button 
-                  onClick={() => setShowSettings(!showSettings)}
-                  className="text-[#8b949e] hover:text-white transition p-1"
-                >
-                  <SettingsIcon />
-                </button>
-              </div>
+              <button 
+                onClick={() => setShowSettings(!showSettings)}
+                className="text-[#8b949e] hover:text-white transition p-1"
+              >
+                <SettingsIcon />
+              </button>
             </div>
 
             {showSettings && (
@@ -422,26 +471,6 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {/* Pool Selector */}
-                {pools.length > 1 && (
-                  <div className="mb-4">
-                    <select
-                      value={selectedPool?.id ?? 0}
-                      onChange={(e) => {
-                        const pool = pools.find(p => p.id === parseInt(e.target.value))
-                        if (pool) setSelectedPool(pool)
-                      }}
-                      className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-2 text-white"
-                    >
-                      {pools.map((pool) => (
-                        <option key={pool.id} value={pool.id}>
-                          {formatDenom(pool.denomA)}/{formatDenom(pool.denomB)} - Pool #{pool.id}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
                 {/* From Token */}
                 <div className="bg-[#0d1117] rounded-xl p-4 mb-2">
                   <div className="flex justify-between text-sm text-[#8b949e] mb-2">
@@ -456,10 +485,12 @@ export default function Home() {
                       onChange={(e) => setFromAmount(e.target.value)}
                       className="bg-transparent text-2xl font-medium w-full outline-none text-white placeholder-[#8b949e] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <div className="flex items-center gap-2 bg-[#161b22] px-3 py-2 rounded-xl border border-[#30363d]">
-                      <TokenIcon token={formatDenom(fromToken)} />
-                      <span className="font-medium">{formatDenom(fromToken)}</span>
-                    </div>
+                    <TokenSelector
+                      value={fromToken}
+                      onChange={setFromToken}
+                      tokens={availableTokens()}
+                      disabledToken={toToken}
+                    />
                   </div>
                 </div>
 
@@ -487,32 +518,54 @@ export default function Home() {
                       readOnly
                       className="bg-transparent text-2xl font-medium w-full outline-none text-white placeholder-[#8b949e] [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
-                    <div className="flex items-center gap-2 bg-[#161b22] px-3 py-2 rounded-xl border border-[#30363d]">
-                      <TokenIcon token={formatDenom(toToken)} />
-                      <span className="font-medium">{formatDenom(toToken)}</span>
-                    </div>
+                    <TokenSelector
+                      value={toToken}
+                      onChange={setToToken}
+                      tokens={availableTokens()}
+                      disabledToken={fromToken}
+                    />
                   </div>
                 </div>
 
+                {/* Auto-Routing Info */}
+                {matchingPools.length > 1 && bestQuote && (
+                  <div className="mt-3 p-3 bg-[#238636]/10 rounded-xl border border-[#238636]/30">
+                    <div className="flex items-center gap-2 text-xs text-[#238636]">
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      <span>Best route: {Number(bestQuote.pool.feeBPS) / 100}% pool</span>
+                    </div>
+                    <p className="text-xs text-[#8b949e] mt-1">
+                      Comparing {matchingPools.length} pools to get you the best rate
+                    </p>
+                  </div>
+                )}
+
+                {/* No Pool Warning */}
+                {fromToken && toToken && matchingPools.length === 0 && (
+                  <div className="mt-4 p-3 bg-[#f8514926] rounded-xl border border-[#f85149] text-sm text-[#f85149]">
+                    No pool exists for {formatDenom(fromToken)}/{formatDenom(toToken)}. Create one in the Pool tab.
+                  </div>
+                )}
+
                 {/* Price Info */}
-                {selectedPool && selectedPool.reserveA > 0n && (
+                {bestQuote && bestQuote.pool.reserveA > 0n && (
                   <div className="mt-4 p-3 bg-[#0d1117] rounded-xl text-sm">
                     <div className="flex justify-between text-[#8b949e]">
                       <span>Price</span>
                       <span>
-                        1 {formatDenom(selectedPool.denomA)} ={' '}
-                        {calculatePrice(
-                          selectedPool.reserveA,
-                          selectedPool.reserveB,
-                          selectedPool.denomA,
-                          selectedPool.denomB
-                        ).toFixed(6)}{' '}
-                        {formatDenom(selectedPool.denomB)}
+                        1 {formatDenom(fromToken)} ={' '}
+                        {bestQuote.tokenIn === 'A' 
+                          ? (Number(bestQuote.pool.reserveB) / Number(bestQuote.pool.reserveA)).toFixed(6)
+                          : (Number(bestQuote.pool.reserveA) / Number(bestQuote.pool.reserveB)).toFixed(6)
+                        }{' '}
+                        {formatDenom(toToken)}
                       </span>
                     </div>
                     <div className="flex justify-between text-[#8b949e] mt-1">
-                      <span>Fee</span>
-                      <span>{Number(selectedPool.feeBPS) / 100}%</span>
+                      <span>Fee Tier</span>
+                      <span>{Number(bestQuote.pool.feeBPS) / 100}%</span>
                     </div>
                     <div className="flex justify-between text-[#8b949e] mt-1">
                       <span>Slippage</span>
@@ -532,9 +585,9 @@ export default function Home() {
                 {/* Swap Button */}
                 <button 
                   onClick={handleSwap}
-                  disabled={!walletAddress || !fromAmount || !toAmount || swapLoading}
+                  disabled={!walletAddress || !fromAmount || !toAmount || swapLoading || !bestQuote}
                   className={`w-full mt-4 py-4 rounded-xl font-semibold text-lg transition ${
-                    walletAddress && fromAmount && toAmount && !swapLoading
+                    walletAddress && fromAmount && toAmount && !swapLoading && bestQuote
                       ? 'bg-[#238636] hover:bg-[#2ea043] text-white'
                       : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'
                   }`}
@@ -548,6 +601,8 @@ export default function Home() {
                     'Connect Wallet to Swap'
                   ) : !fromAmount ? (
                     'Enter Amount'
+                  ) : matchingPools.length === 0 ? (
+                    'No Pool Available'
                   ) : (
                     'Swap'
                   )}
@@ -574,6 +629,66 @@ export default function Home() {
           <StatCard title="Total Pools" value={pools.length.toString()} />
         </div>
       </section>
+    </div>
+  )
+}
+
+// Token Selector Dropdown Component
+function TokenSelector({ 
+  value, 
+  onChange, 
+  tokens, 
+  disabledToken 
+}: { 
+  value: string
+  onChange: (token: string) => void
+  tokens: string[]
+  disabledToken: string
+}) {
+  const [open, setOpen] = useState(false)
+  
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 bg-[#161b22] px-3 py-2 rounded-xl border border-[#30363d] hover:border-[#8b949e] transition min-w-[120px]"
+      >
+        <TokenIcon token={formatDenom(value)} />
+        <span className="font-medium">{formatDenom(value) || 'Select'}</span>
+        <svg className="w-4 h-4 text-[#8b949e]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      
+      {open && (
+        <>
+          <div className="fixed inset-0 z-20" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 mt-2 w-48 bg-[#161b22] border border-[#30363d] rounded-xl shadow-lg z-30 max-h-64 overflow-y-auto">
+            {tokens.map(token => (
+              <button
+                key={token}
+                onClick={() => {
+                  if (token !== disabledToken) {
+                    onChange(token)
+                    setOpen(false)
+                  }
+                }}
+                disabled={token === disabledToken}
+                className={`w-full flex items-center gap-2 px-3 py-2 text-left transition ${
+                  token === disabledToken 
+                    ? 'opacity-40 cursor-not-allowed' 
+                    : token === value
+                      ? 'bg-[#238636]/20 text-white'
+                      : 'hover:bg-[#21262d] text-white'
+                }`}
+              >
+                <TokenIcon token={formatDenom(token)} />
+                <span>{formatDenom(token)}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   )
 }
@@ -640,13 +755,13 @@ function PoolTab({
 
   const handleSliderChange = (value: number) => {
     if (userLpBalance === 0n) return
-    setSelectedPercent(null) // Clear button selection when using slider
+    setSelectedPercent(null)
     const amount = (userLpBalance * BigInt(value)) / 100n
     setLpAmount(formatAmount(amount, 'lp'))
   }
 
   const handleLpAmountChange = (value: string) => {
-    setSelectedPercent(null) // Clear button selection when typing
+    setSelectedPercent(null)
     setLpAmount(value)
   }
 
@@ -673,14 +788,12 @@ function PoolTab({
         setAmountB('')
         await onRefresh()
       } else if (result.code === 4001 || result.code === 4000) {
-        // Transaction timed out or was cancelled - silent
         console.log('Transaction timed out or cancelled')
       } else {
         alert(`Failed: ${result.message || 'Unknown error'}`)
       }
     } catch (error) {
       console.error('Add liquidity error:', error)
-      // Don't show alert for timeout errors
       const msg = error instanceof Error ? error.message : ''
       if (!msg.includes('rejected') && !msg.includes('timed out')) {
         alert(msg || 'Failed to add liquidity')
@@ -709,7 +822,6 @@ function PoolTab({
         setSelectedPercent(null)
         await onRefresh()
       } else if (result.code === 4001 || result.code === 4000) {
-        // Transaction timed out or was cancelled - silent
         console.log('Transaction timed out or cancelled')
       } else {
         alert(`Failed: ${result.message || 'Unknown error'}`)
@@ -725,7 +837,6 @@ function PoolTab({
     }
   }
 
-  // Calculate user's share of pool
   const getUserPoolShare = (poolId: number, pool: PoolInfo): number => {
     const lpBalance = lpBalances.get(poolId) || 0n
     if (pool.totalLP === 0n || lpBalance === 0n) return 0
@@ -830,7 +941,6 @@ function PoolTab({
                       </div>
                     </div>
                     
-                    {/* User's Position */}
                     {walletAddress && userLp > 0n && (
                       <div className="mt-3 pt-3 border-t border-[#30363d]">
                         <p className="text-xs text-[#238636] mb-2">Your Position</p>
@@ -870,7 +980,6 @@ function PoolTab({
             </div>
           )}
 
-          {/* CLMM Preview */}
           <div className="mt-4 p-4 bg-[#0d1117] rounded-xl border border-dashed border-[#30363d]">
             <p className="text-[#8b949e] text-sm text-center">
               🚧 CLMM concentrated liquidity positions coming soon
@@ -883,7 +992,6 @@ function PoolTab({
         <div className="space-y-4">
           <h3 className="text-lg font-semibold">Add Liquidity</h3>
           
-          {/* Pool Selector */}
           {pools.length > 0 && (
             <select
               value={selectedPoolId}
@@ -892,7 +1000,7 @@ function PoolTab({
             >
               {pools.map((pool) => (
                 <option key={pool.id} value={pool.id}>
-                  {formatDenom(pool.denomA)}/{formatDenom(pool.denomB)} - Pool #{pool.id}
+                  {formatDenom(pool.denomA)}/{formatDenom(pool.denomB)} ({Number(pool.feeBPS)/100}%) - Pool #{pool.id}
                 </option>
               ))}
             </select>
@@ -900,7 +1008,6 @@ function PoolTab({
 
           {selectedPool && (
             <>
-              {/* Token A Input */}
               <div className="bg-[#0d1117] rounded-xl p-4">
                 <div className="flex justify-between text-sm text-[#8b949e] mb-2">
                   <span>{formatDenom(selectedPool.denomA)}</span>
@@ -921,7 +1028,6 @@ function PoolTab({
                 </div>
               </div>
 
-              {/* Token B Input */}
               <div className="bg-[#0d1117] rounded-xl p-4">
                 <div className="flex justify-between text-sm text-[#8b949e] mb-2">
                   <span>{formatDenom(selectedPool.denomB)}</span>
@@ -936,7 +1042,6 @@ function PoolTab({
                 />
               </div>
 
-              {/* Pool Info */}
               <div className="p-3 bg-[#0d1117] rounded-xl text-sm">
                 <div className="flex justify-between text-[#8b949e]">
                   <span>Current Price</span>
@@ -963,7 +1068,6 @@ function PoolTab({
                 </div>
               </div>
 
-              {/* Add Button */}
               <button
                 onClick={handleAddLiquidity}
                 disabled={!walletAddress || !amountA || !amountB || actionLoading}
@@ -993,7 +1097,6 @@ function PoolTab({
         <div className="space-y-4">
           <h3 className="text-lg font-semibold">Remove Liquidity</h3>
           
-          {/* Pool Selector */}
           {pools.length > 0 && (
             <select
               value={selectedPoolId}
@@ -1008,7 +1111,7 @@ function PoolTab({
                 const lp = lpBalances.get(pool.id) || 0n
                 return (
                   <option key={pool.id} value={pool.id}>
-                    {formatDenom(pool.denomA)}/{formatDenom(pool.denomB)} - Pool #{pool.id}
+                    {formatDenom(pool.denomA)}/{formatDenom(pool.denomB)} ({Number(pool.feeBPS)/100}%) - Pool #{pool.id}
                     {lp > 0n ? ` (${formatAmount(lp, 'lp')} LP)` : ''}
                   </option>
                 )
@@ -1018,7 +1121,6 @@ function PoolTab({
 
           {selectedPool && (
             <>
-              {/* Your Position Info */}
               <div className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d]">
                 <p className="text-sm text-[#8b949e] mb-3">Your Position</p>
                 <div className="grid grid-cols-2 gap-4">
@@ -1055,14 +1157,12 @@ function PoolTab({
                 </div>
               </div>
 
-              {/* Amount Selection */}
               <div className="bg-[#0d1117] rounded-xl p-4">
                 <div className="flex justify-between text-sm text-[#8b949e] mb-2">
                   <span>Amount to Remove</span>
                   <span>Available: {formatAmount(userLpBalance, 'lp')}</span>
                 </div>
                 
-                {/* Percentage Buttons */}
                 <div className="flex gap-2 mb-4">
                   {[25, 50, 75, 100].map((pct) => (
                     <button
@@ -1082,7 +1182,6 @@ function PoolTab({
                   ))}
                 </div>
 
-                {/* Slider */}
                 <div className="mb-4">
                   <input
                     type="range"
@@ -1100,7 +1199,6 @@ function PoolTab({
                   </div>
                 </div>
 
-                {/* LP Amount Display */}
                 <input
                   type="number"
                   placeholder="0.00"
@@ -1110,7 +1208,6 @@ function PoolTab({
                 />
               </div>
 
-              {/* Expected Output */}
               {lpAmount && parseFloat(lpAmount) > 0 && (
                 <div className="p-3 bg-[#0d1117] rounded-xl text-sm">
                   <p className="text-[#8b949e] mb-2">You will receive:</p>
@@ -1135,7 +1232,6 @@ function PoolTab({
                 </div>
               )}
 
-              {/* Remove Button */}
               <button
                 onClick={handleRemoveLiquidity}
                 disabled={!walletAddress || !lpAmount || parseFloat(lpAmount) <= 0 || actionLoading || userLpBalance === 0n}
@@ -1173,7 +1269,6 @@ function PoolTab({
               After creating the pool, you'll need to add initial liquidity.
             </p>
             
-            {/* Token A */}
             <div className="mb-4">
               <label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label>
               <select
@@ -1186,7 +1281,6 @@ function PoolTab({
               <p className="text-xs text-[#8b949e] mt-1">Native token is recommended as base</p>
             </div>
             
-            {/* Token B */}
             <div className="mb-4">
               <label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label>
               <input
@@ -1199,31 +1293,29 @@ function PoolTab({
               <p className="text-xs text-[#8b949e] mt-1">Full realm token path (e.g., /gno.land/r/dev/gnomo:tokenname)</p>
             </div>
             
-            {/* Fee Tier */}
             <div className="mb-4">
               <label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label>
-              <div className="flex gap-2">
-                {[30, 50, 100].map((fee) => (
+              <div className="grid grid-cols-3 gap-2">
+                {[5, 10, 30, 50, 100, 200].map((fee) => (
                   <button
                     key={fee}
                     onClick={() => setNewFeeBps(fee)}
-                    className={`flex-1 py-3 rounded-xl text-sm font-medium transition ${
+                    className={`py-3 rounded-xl text-sm font-medium transition ${
                       newFeeBps === fee
                         ? 'bg-[#238636] text-white'
                         : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'
                     }`}
                   >
-                    {(fee / 100).toFixed(1)}%
+                    {fee < 100 ? (fee / 100).toFixed(2) : (fee / 100).toFixed(1)}%
                   </button>
                 ))}
               </div>
               <p className="text-xs text-[#8b949e] mt-2">
-                0.3% is standard for most V2 pools
+                Lower fees attract more volume, higher fees earn more per trade. 0.3% is standard.
               </p>
             </div>
           </div>
 
-          {/* Pool Preview */}
           {newTokenB && (
             <div className="p-3 bg-[#0d1117] rounded-xl text-sm">
               <p className="text-[#8b949e] mb-2">Pool Preview:</p>
@@ -1233,12 +1325,11 @@ function PoolTab({
               </div>
               <div className="flex justify-between text-white mt-1">
                 <span>Fee</span>
-                <span>{newFeeBps / 100}%</span>
+                <span>{newFeeBps < 100 ? (newFeeBps / 100).toFixed(2) : (newFeeBps / 100).toFixed(1)}%</span>
               </div>
             </div>
           )}
 
-          {/* Create Button */}
           <button
             onClick={async () => {
               if (!walletAddress || !newTokenB) return
@@ -1293,7 +1384,6 @@ function PoolTab({
             )}
           </button>
 
-          {/* Dev Tools - Mint Test Tokens */}
           <div className="mt-6 p-4 bg-[#0d1117] rounded-xl border border-dashed border-[#30363d]">
             <p className="text-sm text-[#f0883e] mb-3">🔧 Dev Tools - Mint Test Tokens</p>
             <div className="flex gap-2 mb-3">
