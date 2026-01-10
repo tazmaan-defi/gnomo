@@ -405,3 +405,17 @@ export async function swapCLMM(params: {
     gasFee: 1000000,
   });
 }
+
+export async function collectCLMMFees(params: {
+  caller: string;
+  positionId: number;
+}): Promise<AdenaResponse> {
+  return executeContract({
+    caller: params.caller,
+    pkgPath: CLMM_PKG_PATH,
+    func: 'CollectFees',
+    args: [params.positionId.toString()],
+    gasWanted: 5000000,
+    gasFee: 1000000,
+  });
+}

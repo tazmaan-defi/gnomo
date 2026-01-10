@@ -17,12 +17,14 @@ import {
   mintCLMMPosition,
   burnCLMMPosition,
   swapCLMM,
+  collectCLMMFees,
 } from '@/lib/adena'
 import {
   getAllCLMMPools,
   getPositionsByOwner,
   getPosition,
   getCLMMQuote,
+  getPositionFees,
   CLMMPool,
   CLMMPosition,
   formatCLMMDenom,
@@ -76,6 +78,7 @@ export default function Home() {
 
   const [clmmPools, setClmmPools] = useState<CLMMPool[]>([])
   const [clmmPositions, setClmmPositions] = useState<CLMMPosition[]>([])
+  const [positionFees, setPositionFees] = useState<Map<number, { feesA: bigint; feesB: bigint }>>(new Map())
   const [clmmTab, setClmmTab] = useState<'pools' | 'positions' | 'create' | 'mint'>('pools')
   const [selectedClmmPool, setSelectedClmmPool] = useState<CLMMPool | null>(null)
   const [clmmLoading, setClmmLoading] = useState(false)
@@ -226,16 +229,28 @@ export default function Home() {
     const fetchClmmPositions = async () => {
       if (!walletAddress) {
         setClmmPositions([])
+        setPositionFees(new Map())
         return
       }
       try {
         const positionIds = await getPositionsByOwner(walletAddress)
         const positions: CLMMPosition[] = []
+        const fees = new Map<number, { feesA: bigint; feesB: bigint }>()
         for (const id of positionIds) {
           const pos = await getPosition(id)
-          if (pos && pos.liquidity > 0n) positions.push(pos)
+          if (pos && pos.liquidity > 0n) {
+            positions.push(pos)
+            // Fetch fees for each position
+            try {
+              const positionFees = await getPositionFees(id)
+              fees.set(id, positionFees)
+            } catch (e) {
+              fees.set(id, { feesA: 0n, feesB: 0n })
+            }
+          }
         }
         setClmmPositions(positions)
+        setPositionFees(fees)
       } catch (e) {
         console.error('Failed to fetch CLMM positions:', e)
       }
@@ -442,11 +457,21 @@ export default function Home() {
         setLpBalances(newLpBalances)
         const positionIds = await getPositionsByOwner(walletAddress)
         const positions: CLMMPosition[] = []
+        const fees = new Map<number, { feesA: bigint; feesB: bigint }>()
         for (const id of positionIds) {
           const pos = await getPosition(id)
-          if (pos && pos.liquidity > 0n) positions.push(pos)
+          if (pos && pos.liquidity > 0n) {
+            positions.push(pos)
+            try {
+              const posFees = await getPositionFees(id)
+              fees.set(id, posFees)
+            } catch (e) {
+              fees.set(id, { feesA: 0n, feesB: 0n })
+            }
+          }
         }
         setClmmPositions(positions)
+        setPositionFees(fees)
       }
     } catch (e) {
       console.error('Refresh error:', e)
@@ -654,6 +679,27 @@ export default function Home() {
     }
   }
 
+  const handleCollectFees = async (positionId: number) => {
+    if (!walletAddress) return
+    setClmmLoading(true)
+    try {
+      const result = await collectCLMMFees({
+        caller: walletAddress,
+        positionId,
+      })
+      if (result.code === 0) {
+        alert('Fees collected!')
+        await onRefresh()
+      } else if (result.code !== 4001 && result.code !== 4000) {
+        alert(`Failed: ${result.message}`)
+      }
+    } catch (e) {
+      console.error('Collect fees error:', e)
+    } finally {
+      setClmmLoading(false)
+    }
+  }
+
   const rpcStatus = pools.length > 0 || !loading
   const totalTVL = pools.reduce((sum, pool) => sum + Number(pool.reserveA) + Number(pool.reserveB), 0)
 
@@ -759,6 +805,48 @@ export default function Home() {
                       <span>1 {formatDenom(fromToken)} = {(parseFloat(toAmount) / parseFloat(fromAmount)).toFixed(6)} {formatDenom(toToken)}</span>
                     </div>
                   )}
+                  {/* Price Impact Warning */}
+                  {fromAmount && toAmount && (() => {
+                    const inputAmt = parseFloat(fromAmount)
+                    const outputAmt = parseFloat(toAmount)
+                    if (inputAmt <= 0 || outputAmt <= 0) return null
+
+                    // Calculate spot price from pool
+                    let spotPrice = 0
+                    if (bestQuote.poolType === 'v2' && bestQuote.pool) {
+                      const pool = bestQuote.pool
+                      if (bestQuote.tokenIn === 'A') {
+                        spotPrice = Number(pool.reserveB) / Number(pool.reserveA)
+                      } else {
+                        spotPrice = Number(pool.reserveA) / Number(pool.reserveB)
+                      }
+                    } else if (bestQuote.poolType === 'clmm' && bestQuote.clmmPool) {
+                      const clmmPrice = Number(bestQuote.clmmPool.priceX6) / 1_000_000
+                      spotPrice = bestQuote.tokenIn === 'A' ? clmmPrice : 1 / clmmPrice
+                    }
+
+                    if (spotPrice <= 0) return null
+
+                    // Execution price from quote
+                    const execPrice = outputAmt / inputAmt
+                    // Price impact = (spot - exec) / spot * 100
+                    const priceImpact = ((spotPrice - execPrice) / spotPrice) * 100
+
+                    // Only show if impact > 0.1%
+                    if (priceImpact < 0.1) return null
+
+                    const impactColor = priceImpact >= 5 ? 'text-[#f85149]' : priceImpact >= 1 ? 'text-[#f0883e]' : 'text-[#8b949e]'
+                    const bgColor = priceImpact >= 5 ? 'bg-[#f8514926] border border-[#f85149]' : priceImpact >= 1 ? 'bg-[#f0883e26] border border-[#f0883e]' : ''
+
+                    return (
+                      <div className={`flex justify-between mt-1 ${bgColor ? `mt-2 p-2 rounded-lg ${bgColor}` : ''}`}>
+                        <span className={impactColor}>Price Impact</span>
+                        <span className={`font-medium ${impactColor}`}>
+                          {priceImpact >= 5 && '⚠️ '}{priceImpact.toFixed(2)}%
+                        </span>
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 
@@ -973,10 +1061,46 @@ export default function Home() {
                           <span className={`text-xs px-2 py-1 rounded-full ${inRange ? 'bg-[#238636] text-white' : 'bg-[#f85149] text-white'}`}>{inRange ? 'In Range' : 'Out of Range'}</span>
                         </div>
                         <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div><p className="text-[#8b949e]">Tick Range</p><p className="font-medium">{pos.tickLower} → {pos.tickUpper}</p></div>
                           <div><p className="text-[#8b949e]">Liquidity</p><p className="font-medium">{pos.liquidity.toString()}</p></div>
-                          <div><p className="text-[#8b949e]">Min Price</p><p className="font-medium">{tickToPrice(pos.tickLower).toFixed(4)}</p></div>
-                          <div><p className="text-[#8b949e]">Max Price</p><p className="font-medium">{tickToPrice(pos.tickUpper).toFixed(4)}</p></div>
+                          <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{pC.toFixed(4)}</p></div>
+                        </div>
+                        {/* Range Visualization */}
+                        <div className="mt-3 p-3 bg-[#21262d] rounded-lg">
+                          <div className="flex justify-between text-xs text-[#8b949e] mb-1">
+                            <span>{pL.toFixed(4)}</span>
+                            <span className="text-[#58a6ff]">Current: {pC.toFixed(4)}</span>
+                            <span>{pU.toFixed(4)}</span>
+                          </div>
+                          <div className="relative h-3 bg-[#0d1117] rounded-full overflow-hidden">
+                            {/* Position range bar */}
+                            <div className={`absolute h-full ${inRange ? 'bg-[#238636]' : 'bg-[#f85149]'} opacity-60`} style={{ left: '0%', right: '0%' }} />
+                            {/* Current price marker */}
+                            {(() => {
+                              // Calculate position of current price within range
+                              // Use log scale for better visualization
+                              const logPL = Math.log(pL)
+                              const logPU = Math.log(pU)
+                              const logPC = Math.log(pC)
+                              const rangeWidth = logPU - logPL
+                              let position = ((logPC - logPL) / rangeWidth) * 100
+                              // Clamp to show marker even when out of range
+                              const clampedPosition = Math.max(0, Math.min(100, position))
+                              const isOutLeft = pC < pL
+                              const isOutRight = pC > pU
+                              return (
+                                <div
+                                  className={`absolute top-0 h-full w-0.5 ${inRange ? 'bg-white' : isOutLeft ? 'bg-[#f85149]' : 'bg-[#f85149]'}`}
+                                  style={{ left: `${clampedPosition}%`, transform: 'translateX(-50%)' }}
+                                >
+                                  <div className={`absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full ${inRange ? 'bg-white' : 'bg-[#f85149]'}`} />
+                                </div>
+                              )
+                            })()}
+                          </div>
+                          <div className="flex justify-between text-xs mt-1">
+                            <span className="text-[#8b949e]">Min Price</span>
+                            <span className="text-[#8b949e]">Max Price</span>
+                          </div>
                         </div>
                         <div className="mt-3 pt-3 border-t border-[#21262d] grid grid-cols-2 gap-4 text-sm">
                           <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomA)} Amount</p><p className="font-medium text-[#238636]">{amountA > 0 ? (amountA / 1_000_000).toFixed(4) : '0'}</p></div>
@@ -991,7 +1115,36 @@ export default function Home() {
                             </span>
                           </div>
                         </div>
-                        <button onClick={() => handleBurnPosition(pos.id)} disabled={clmmLoading} className="w-full mt-3 py-2 rounded-lg text-sm font-medium bg-[#f85149] hover:bg-[#da3633] text-white transition disabled:opacity-50">{clmmLoading ? 'Closing...' : 'Close Position'}</button>
+                        {/* Uncollected fees section */}
+                        {(() => {
+                          const fees = positionFees.get(pos.id)
+                          const hasUncollectedFees = fees && (fees.feesA > 0n || fees.feesB > 0n)
+                          return hasUncollectedFees ? (
+                            <div className="mt-2 p-2 bg-[#238636]/10 border border-[#238636]/30 rounded-lg text-sm">
+                              <div className="flex justify-between items-center mb-1">
+                                <span className="text-[#238636] font-medium">Uncollected Fees</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-[#8b949e]">
+                                <span>{formatCLMMDenom(pool.denomA)}</span>
+                                <span className="text-[#238636]">+{fmtAmt(fees.feesA)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs text-[#8b949e]">
+                                <span>{formatCLMMDenom(pool.denomB)}</span>
+                                <span className="text-[#238636]">+{fmtAmt(fees.feesB)}</span>
+                              </div>
+                            </div>
+                          ) : null
+                        })()}
+                        <div className="flex gap-2 mt-3">
+                          {(() => {
+                            const fees = positionFees.get(pos.id)
+                            const hasUncollectedFees = fees && (fees.feesA > 0n || fees.feesB > 0n)
+                            return hasUncollectedFees ? (
+                              <button onClick={() => handleCollectFees(pos.id)} disabled={clmmLoading} className="flex-1 py-2 rounded-lg text-sm font-medium bg-[#238636] hover:bg-[#2ea043] text-white transition disabled:opacity-50">{clmmLoading ? 'Collecting...' : 'Collect Fees'}</button>
+                            ) : null
+                          })()}
+                          <button onClick={() => handleBurnPosition(pos.id)} disabled={clmmLoading} className={`${positionFees.get(pos.id) && (positionFees.get(pos.id)!.feesA > 0n || positionFees.get(pos.id)!.feesB > 0n) ? 'flex-1' : 'w-full'} py-2 rounded-lg text-sm font-medium bg-[#f85149] hover:bg-[#da3633] text-white transition disabled:opacity-50`}>{clmmLoading ? 'Closing...' : 'Close Position'}</button>
+                        </div>
                       </div>
                     )
                   })}

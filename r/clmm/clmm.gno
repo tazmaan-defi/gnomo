@@ -428,6 +428,94 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 }
 
 // =============================================================================
+// COLLECT FEES
+// =============================================================================
+
+func CollectFees(_ realm, positionID uint64) (int64, int64) {
+	if positionID >= uint64(len(positions)) {
+		panic("position not found")
+	}
+
+	pos := positions[positionID]
+	caller := string(runtime.OriginCaller())
+
+	if pos.Owner != caller {
+		panic("not owner")
+	}
+
+	pool := pools[pos.PoolID]
+
+	// Calculate fees owed since last collection
+	// Only collect fees if position is/was in range
+	var feesA, feesB int64
+
+	if pos.Liquidity > 0 {
+		// Calculate accumulated fees based on fee growth difference
+		feeGrowthDeltaA := pool.FeeGrowthA - pos.FeeGrowthLastA
+		feeGrowthDeltaB := pool.FeeGrowthB - pos.FeeGrowthLastB
+
+		feesA = (feeGrowthDeltaA * pos.Liquidity) / PRECISION
+		feesB = (feeGrowthDeltaB * pos.Liquidity) / PRECISION
+
+		// Update position's last fee growth snapshot
+		pos.FeeGrowthLastA = pool.FeeGrowthA
+		pos.FeeGrowthLastB = pool.FeeGrowthB
+	}
+
+	// Add any previously uncollected tokens
+	feesA += pos.TokensOwedA
+	feesB += pos.TokensOwedB
+	pos.TokensOwedA = 0
+	pos.TokensOwedB = 0
+
+	// Send fees to owner
+	if feesA > 0 || feesB > 0 {
+		bnk := banker.NewBanker(banker.BankerTypeRealmSend)
+		realmAddr := runtime.CurrentRealm().Address()
+		callerAddr := runtime.OriginCaller()
+
+		if feesA > 0 && feesB > 0 {
+			coins := chain.NewCoins(
+				chain.NewCoin(pool.DenomA, feesA),
+				chain.NewCoin(pool.DenomB, feesB),
+			)
+			bnk.SendCoins(realmAddr, callerAddr, coins)
+		} else if feesA > 0 {
+			bnk.SendCoins(realmAddr, callerAddr, chain.NewCoins(chain.NewCoin(pool.DenomA, feesA)))
+		} else {
+			bnk.SendCoins(realmAddr, callerAddr, chain.NewCoins(chain.NewCoin(pool.DenomB, feesB)))
+		}
+	}
+
+	return feesA, feesB
+}
+
+// GetPositionFees returns uncollected fees for a position
+func GetPositionFees(positionID uint64) (int64, int64) {
+	if positionID >= uint64(len(positions)) {
+		return 0, 0
+	}
+
+	pos := positions[positionID]
+	pool := pools[pos.PoolID]
+
+	var feesA, feesB int64
+
+	if pos.Liquidity > 0 {
+		feeGrowthDeltaA := pool.FeeGrowthA - pos.FeeGrowthLastA
+		feeGrowthDeltaB := pool.FeeGrowthB - pos.FeeGrowthLastB
+
+		feesA = (feeGrowthDeltaA * pos.Liquidity) / PRECISION
+		feesB = (feeGrowthDeltaB * pos.Liquidity) / PRECISION
+	}
+
+	feesA += pos.TokensOwedA
+	feesB += pos.TokensOwedB
+
+	return feesA, feesB
+}
+
+// =============================================================================
 // TICK HELPERS
 // =============================================================================
 

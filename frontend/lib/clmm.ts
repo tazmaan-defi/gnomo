@@ -266,6 +266,20 @@ export async function getCLMMRealmAddress(): Promise<string> {
   }
 }
 
+export async function getPositionFees(positionId: number): Promise<{ feesA: bigint; feesB: bigint }> {
+  try {
+    const result = await queryEval(`GetPositionFees(${positionId})`)
+    const values = parseGoTuple(result)
+    return {
+      feesA: BigInt(values[0] || '0'),
+      feesB: BigInt(values[1] || '0'),
+    }
+  } catch (e) {
+    console.error('Failed to get position fees:', e)
+    return { feesA: 0n, feesB: 0n }
+  }
+}
+
 // =============================================================================
 // Formatting helpers
 // =============================================================================
