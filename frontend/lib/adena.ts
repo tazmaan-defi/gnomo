@@ -320,3 +320,88 @@ export async function getBalances(): Promise<Map<string, bigint>> {
   
   return balances;
 }
+
+// ==================== CLMM functions ====================
+
+const CLMM_PKG_PATH = 'gno.land/r/dev/clmm';
+
+export async function createCLMMPool(params: {
+  caller: string;
+  denomA: string;
+  denomB: string;
+  feeBps: number;
+  initialPriceX6: bigint;
+}): Promise<AdenaResponse> {
+  return executeContract({
+    caller: params.caller,
+    pkgPath: CLMM_PKG_PATH,
+    func: 'CreateCLMMPool',
+    args: [params.denomA, params.denomB, params.feeBps.toString(), params.initialPriceX6.toString()],
+    gasWanted: 5000000,
+    gasFee: 1000000,
+  });
+}
+
+export async function mintCLMMPosition(params: {
+  caller: string;
+  poolId: number;
+  tickLower: number;
+  tickUpper: number;
+  amountA: bigint;
+  amountB: bigint;
+  denomA: string;
+  denomB: string;
+}): Promise<AdenaResponse> {
+  const coins: string[] = [];
+  if (params.amountA > 0n) coins.push(`${params.amountA}${params.denomA}`);
+  if (params.amountB > 0n) coins.push(`${params.amountB}${params.denomB}`);
+  
+  return executeContract({
+    caller: params.caller,
+    pkgPath: CLMM_PKG_PATH,
+    func: 'MintPosition',
+    args: [params.poolId.toString(), params.tickLower.toString(), params.tickUpper.toString()],
+    send: coins.join(','),
+    gasWanted: 5000000,
+    gasFee: 1000000,
+  });
+}
+
+export async function burnCLMMPosition(params: {
+  caller: string;
+  positionId: number;
+}): Promise<AdenaResponse> {
+  return executeContract({
+    caller: params.caller,
+    pkgPath: CLMM_PKG_PATH,
+    func: 'BurnPosition',
+    args: [params.positionId.toString()],
+    gasWanted: 5000000,
+    gasFee: 1000000,
+  });
+}
+
+export async function swapCLMM(params: {
+  caller: string;
+  poolId: number;
+  tokenIn: 'A' | 'B';
+  amountIn: bigint;
+  minAmountOut: bigint;
+  denomIn: string;
+}): Promise<AdenaResponse> {
+  const sendStr = `${params.amountIn}${params.denomIn}`;
+
+  return executeContract({
+    caller: params.caller,
+    pkgPath: CLMM_PKG_PATH,
+    func: 'Swap',
+    args: [
+      params.poolId.toString(),
+      params.tokenIn,
+      params.minAmountOut.toString(),
+    ],
+    send: sendStr,
+    gasWanted: 5000000,
+    gasFee: 1000000,
+  });
+}
