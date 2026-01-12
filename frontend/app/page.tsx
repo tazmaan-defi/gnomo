@@ -44,6 +44,7 @@ import {
   NoPositionsEmpty,
   WalletNotConnectedEmpty,
 } from '@/components'
+import { parseContractError, isUserRejection } from '@/lib/errors'
 
 type BestQuoteResult = {
   pool: PoolInfo | null
@@ -403,6 +404,7 @@ export default function Home() {
   const handleSwap = async () => {
     if (!walletAddress || !bestQuote || !fromAmount) return
     setSwapLoading(true)
+    const loadingToast = toast.loading('Confirming Swap', 'Please confirm in your wallet...')
     try {
       const amountIn = BigInt(Math.floor(parseFloat(fromAmount) * 1_000_000))
       const minOut = (bestQuote.amountOut * BigInt(10000 - slippageBps)) / 10000n
@@ -431,19 +433,22 @@ export default function Home() {
       }
 
       if (result.code === 0) {
-        toast.success('Swap Successful', `${fromAmount} ${formatDenom(fromToken)} → ${toAmount} ${formatDenom(toToken)}`)
+        toast.update(loadingToast, 'success', 'Swap Successful', `${fromAmount} ${formatDenom(fromToken)} → ${toAmount} ${formatDenom(toToken)}`)
         setFromAmount('')
         setToAmount('')
         setBestQuote(null)
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Swap Failed', result.message || 'Unknown error')
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Swap Failed', parseContractError(result))
       }
     } catch (error) {
       console.error('Swap error:', error)
-      const msg = error instanceof Error ? error.message : ''
-      if (!msg.includes('rejected') && !msg.includes('timed out')) {
-        toast.error('Swap Failed', msg || 'Transaction failed')
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Swap Failed', parseContractError(error))
       }
     } finally {
       setSwapLoading(false)
@@ -588,6 +593,7 @@ export default function Home() {
   const handleAddLiquidity = async () => {
     if (!walletAddress || !selectedPool || !amountA || !amountB) return
     setActionLoading(true)
+    const loadingToast = toast.loading('Adding Liquidity', 'Please confirm in your wallet...')
     try {
       const amtA = BigInt(Math.floor(parseFloat(amountA) * 1_000_000))
       const amtB = BigInt(Math.floor(parseFloat(amountB) * 1_000_000))
@@ -600,18 +606,21 @@ export default function Home() {
         denomB: selectedPool.denomB,
       })
       if (result.code === 0) {
-        toast.success('Liquidity Added', `Added ${amountA} ${formatDenom(selectedPool.denomA)} and ${amountB} ${formatDenom(selectedPool.denomB)}`)
+        toast.update(loadingToast, 'success', 'Liquidity Added', `Added ${amountA} ${formatDenom(selectedPool.denomA)} and ${amountB} ${formatDenom(selectedPool.denomB)}`)
         setAmountA('')
         setAmountB('')
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Add Liquidity Failed', result.message || 'Unknown error')
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Add Liquidity Failed', parseContractError(result))
       }
     } catch (error) {
       console.error('Add liquidity error:', error)
-      const msg = error instanceof Error ? error.message : ''
-      if (!msg.includes('rejected') && !msg.includes('timed out')) {
-        toast.error('Add Liquidity Failed', msg || 'Transaction failed')
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Add Liquidity Failed', parseContractError(error))
       }
     } finally {
       setActionLoading(false)
@@ -621,6 +630,7 @@ export default function Home() {
   const handleRemoveLiquidity = async () => {
     if (!walletAddress || !selectedPool || !lpAmount) return
     setActionLoading(true)
+    const loadingToast = toast.loading('Removing Liquidity', 'Please confirm in your wallet...')
     try {
       const lpAmt = BigInt(Math.floor(parseFloat(lpAmount) * 1_000_000))
       const result = await adenaRemoveLiquidity({
@@ -629,18 +639,21 @@ export default function Home() {
         lpAmount: lpAmt,
       })
       if (result.code === 0) {
-        toast.success('Liquidity Removed', 'Your tokens have been returned to your wallet')
+        toast.update(loadingToast, 'success', 'Liquidity Removed', 'Your tokens have been returned to your wallet')
         setLpAmount('')
         setSelectedPercent(null)
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Remove Liquidity Failed', result.message || 'Unknown error')
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Remove Liquidity Failed', parseContractError(result))
       }
     } catch (error) {
       console.error('Remove liquidity error:', error)
-      const msg = error instanceof Error ? error.message : ''
-      if (!msg.includes('rejected') && !msg.includes('timed out')) {
-        toast.error('Remove Liquidity Failed', msg || 'Transaction failed')
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Remove Liquidity Failed', parseContractError(error))
       }
     } finally {
       setActionLoading(false)
@@ -650,6 +663,7 @@ export default function Home() {
   const handleCreateClmmPool = async () => {
     if (!walletAddress || !newClmmTokenB) return
     setClmmLoading(true)
+    const loadingToast = toast.loading('Creating Pool', 'Please confirm in your wallet...')
     try {
       const priceX6 = BigInt(Math.floor(parseFloat(newClmmInitialPrice) * 1_000_000))
       const result = await createCLMMPool({
@@ -660,17 +674,23 @@ export default function Home() {
         initialPriceX6: priceX6,
       })
       if (result.code === 0) {
-        toast.success('CLMM Pool Created', 'Now add a position to start earning fees')
+        toast.update(loadingToast, 'success', 'CLMM Pool Created', 'Now add a position to start earning fees')
         setNewClmmTokenB('')
         setNewClmmInitialPrice('1')
         setClmmTab('pools')
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Create Pool Failed', result.message)
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(result))
       }
-    } catch (e) {
-      console.error('Create CLMM pool error:', e)
-      toast.error('Create Pool Failed', 'Transaction failed')
+    } catch (error) {
+      console.error('Create CLMM pool error:', error)
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(error))
+      }
     } finally {
       setClmmLoading(false)
     }
@@ -679,6 +699,7 @@ export default function Home() {
   const handleMintPosition = async () => {
     if (!walletAddress || !selectedClmmPool || !mintAmountA || !mintAmountB) return
     setClmmLoading(true)
+    const loadingToast = toast.loading('Creating Position', 'Please confirm in your wallet...')
     try {
       const amtA = BigInt(Math.floor(parseFloat(mintAmountA) * 1_000_000))
       const amtB = BigInt(Math.floor(parseFloat(mintAmountB) * 1_000_000))
@@ -693,17 +714,23 @@ export default function Home() {
         denomB: selectedClmmPool.denomB,
       })
       if (result.code === 0) {
-        toast.success('Position Created', `Range: ${mintPriceLower} - ${mintPriceUpper}`)
+        toast.update(loadingToast, 'success', 'Position Created', `Range: ${mintPriceLower} - ${mintPriceUpper}`)
         setMintAmountA('')
         setMintAmountB('')
         setClmmTab('positions')
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Create Position Failed', result.message)
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Create Position Failed', parseContractError(result))
       }
-    } catch (e) {
-      console.error('Mint position error:', e)
-      toast.error('Create Position Failed', 'Transaction failed')
+    } catch (error) {
+      console.error('Mint position error:', error)
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Create Position Failed', parseContractError(error))
+      }
     } finally {
       setClmmLoading(false)
     }
@@ -712,20 +739,27 @@ export default function Home() {
   const handleBurnPosition = async (positionId: number) => {
     if (!walletAddress) return
     setClmmLoading(true)
+    const loadingToast = toast.loading('Closing Position', 'Please confirm in your wallet...')
     try {
       const result = await burnCLMMPosition({
         caller: walletAddress,
         positionId,
       })
       if (result.code === 0) {
-        toast.success('Position Closed', 'Liquidity returned to your wallet')
+        toast.update(loadingToast, 'success', 'Position Closed', 'Liquidity returned to your wallet')
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Close Position Failed', result.message)
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Close Position Failed', parseContractError(result))
       }
-    } catch (e) {
-      console.error('Burn position error:', e)
-      toast.error('Close Position Failed', 'Transaction failed')
+    } catch (error) {
+      console.error('Burn position error:', error)
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Close Position Failed', parseContractError(error))
+      }
     } finally {
       setClmmLoading(false)
     }
@@ -734,20 +768,27 @@ export default function Home() {
   const handleCollectFees = async (positionId: number) => {
     if (!walletAddress) return
     setClmmLoading(true)
+    const loadingToast = toast.loading('Collecting Fees', 'Please confirm in your wallet...')
     try {
       const result = await collectCLMMFees({
         caller: walletAddress,
         positionId,
       })
       if (result.code === 0) {
-        toast.success('Fees Collected', 'Trading fees sent to your wallet')
+        toast.update(loadingToast, 'success', 'Fees Collected', 'Trading fees sent to your wallet')
         await onRefresh()
-      } else if (result.code !== 4001 && result.code !== 4000) {
-        toast.error('Collect Fees Failed', result.message)
+      } else if (result.code === 4001 || result.code === 4000) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Collect Fees Failed', parseContractError(result))
       }
-    } catch (e) {
-      console.error('Collect fees error:', e)
-      toast.error('Collect Fees Failed', 'Transaction failed')
+    } catch (error) {
+      console.error('Collect fees error:', error)
+      if (isUserRejection(error)) {
+        toast.dismiss(loadingToast)
+      } else {
+        toast.update(loadingToast, 'error', 'Collect Fees Failed', parseContractError(error))
+      }
     } finally {
       setClmmLoading(false)
     }
@@ -1223,7 +1264,7 @@ export default function Home() {
                   <div><label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label><input type="text" value={newTokenA} onChange={(e) => setNewTokenA(e.target.value)} placeholder="ugnot" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newTokenB} onChange={(e) => setNewTokenB(e.target.value)} placeholder="/gno.land/r/dev/gnomo:usdc" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label><div className="grid grid-cols-3 gap-2">{[5, 10, 30, 50, 100, 200].map((fee) => <button key={fee} onClick={() => setNewFeeBps(fee)} className={`py-3 rounded-xl text-sm font-medium transition ${newFeeBps === fee ? 'bg-[#238636] text-white' : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'}`}>{fmtFee(fee)}%</button>)}</div></div>
-                  <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { toast.success('Pool Created', `${formatDenom(newTokenA)}/${formatDenom(newTokenB)} pool ready for liquidity`); setNewTokenB(''); setActivePoolTab('add'); await onRefresh() } else if (result.code !== 4001 && result.code !== 4000) { toast.error('Create Pool Failed', result.message) } } catch (e) { console.error(e); toast.error('Create Pool Failed', 'Transaction failed') } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
+                  <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); const loadingToast = toast.loading('Creating Pool', 'Please confirm in your wallet...'); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Pool Created', `${formatDenom(newTokenA)}/${formatDenom(newTokenB)} pool ready for liquidity`); setNewTokenB(''); setActivePoolTab('add'); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
                     {actionLoading ? 'Creating...' : !walletAddress ? 'Connect Wallet' : 'Create Pool'}
                   </button>
                   <div className="mt-6 p-4 bg-[#0d1117] rounded-xl border border-dashed border-[#30363d]">
@@ -1232,7 +1273,7 @@ export default function Home() {
                       <input type="text" value={mintTokenName} onChange={(e) => setMintTokenName(e.target.value.toLowerCase())} placeholder="token name" className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm placeholder-[#484f58]" />
                       <input type="text" value={mintAmount} onChange={(e) => setMintAmount(e.target.value)} placeholder="amount" className="w-28 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm" />
                     </div>
-                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.success('Tokens Minted', `Denom: /gno.land/r/dev/gnomo:${mintTokenName}`); setMintTokenName(''); await onRefresh() } else if (result.code !== 4001 && result.code !== 4000) { toast.error('Mint Failed', result.message) } } catch (e) { console.error(e); toast.error('Mint Failed', 'Transaction failed') } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
+                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); const loadingToast = toast.loading('Minting Tokens', 'Please confirm in your wallet...'); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Tokens Minted', `Denom: /gno.land/r/dev/gnomo:${mintTokenName}`); setMintTokenName(''); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
                   </div>
                 </div>
               )}
