@@ -1,8 +1,8 @@
 // CLMM contract interaction library
-// Connects to gnodev on port 26658
+// Environment-based configuration for local dev vs testnet
 
-export const CLMM_RPC_URL = 'http://127.0.0.1:26657'
-export const CLMM_PKG_PATH = 'gno.land/r/dev/clmm'
+export const CLMM_RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:26657'
+export const CLMM_PKG_PATH = process.env.NEXT_PUBLIC_CLMM_PKG_PATH || 'gno.land/r/dev/clmm'
 
 function stringToHex(str: string): string {
   return Array.from(str)

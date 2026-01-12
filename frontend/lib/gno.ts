@@ -1,8 +1,9 @@
 // frontend/lib/gno.ts
 // Gno RPC client helpers for Gnomo DEX
 
-export const RPC_URL = "http://127.0.0.1:26657";
-export const PKG_PATH = "gno.land/r/dev/gnomo";
+// Environment-based configuration for local dev vs testnet
+export const RPC_URL = process.env.NEXT_PUBLIC_RPC_URL || "http://127.0.0.1:26657";
+export const PKG_PATH = process.env.NEXT_PUBLIC_GNOMO_PKG_PATH || "gno.land/r/dev/gnomo";
 
 function stringToHex(str: string): string {
   return Array.from(str)

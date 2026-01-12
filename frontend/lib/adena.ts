@@ -137,18 +137,23 @@ export async function switchToDevNetwork(): Promise<boolean> {
   }
 
   try {
-    // First try to add the network
+    // First try to add the network (configurable for local dev vs testnet)
+    const chainId = process.env.NEXT_PUBLIC_CHAIN_ID || 'dev';
+    const chainName = process.env.NEXT_PUBLIC_CHAIN_NAME || 'Gno Dev Local';
+    const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL || 'http://127.0.0.1:26657';
+
     await window.adena!.AddNetwork({
-      chainId: 'dev',
-      chainName: 'Gno Dev Local',
-      rpcUrl: 'http://127.0.0.1:26657',
+      chainId,
+      chainName,
+      rpcUrl,
     });
   } catch (e) {
     // Network might already exist, that's fine
   }
 
   try {
-    const response = await window.adena!.SwitchNetwork('dev');
+    const chainId = process.env.NEXT_PUBLIC_CHAIN_ID || 'dev';
+    const response = await window.adena!.SwitchNetwork(chainId);
     return response.code === 0;
   } catch (error) {
     console.error('Failed to switch network:', error);
@@ -199,7 +204,7 @@ export async function executeContract(params: {
 
 // ==================== DEX-specific functions ====================
 
-const PKG_PATH = 'gno.land/r/dev/gnomo';
+const PKG_PATH = process.env.NEXT_PUBLIC_GNOMO_PKG_PATH || 'gno.land/r/dev/gnomo';
 
 // Swap tokens
 export async function swap(params: {
@@ -323,7 +328,7 @@ export async function getBalances(): Promise<Map<string, bigint>> {
 
 // ==================== CLMM functions ====================
 
-const CLMM_PKG_PATH = 'gno.land/r/dev/clmm';
+const CLMM_PKG_PATH = process.env.NEXT_PUBLIC_CLMM_PKG_PATH || 'gno.land/r/dev/clmm';
 
 export async function createCLMMPool(params: {
   caller: string;

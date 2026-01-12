@@ -1,2 +1,2 @@
-module = "gno.land/r/dev/gnomo"
+module = "gno.land/r/gnomo/dex"
 gno = "0.9"
