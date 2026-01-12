@@ -123,6 +123,7 @@ export default function Home() {
   
   const [slippageBps, setSlippageBps] = useState(50)
   const [showSettings, setShowSettings] = useState(false)
+  const [showGettingStarted, setShowGettingStarted] = useState(true)
 
   const [clmmPools, setClmmPools] = useState<CLMMPool[]>([])
   const [clmmPositions, setClmmPositions] = useState<CLMMPosition[]>([])
@@ -820,6 +821,50 @@ export default function Home() {
           </div>
         </div>
       </header>
+
+      {/* Getting Started Guide - Testnet */}
+      {showGettingStarted && (
+        <div className="bg-gradient-to-r from-[#238636]/20 to-[#58a6ff]/20 border-b border-[#30363d]">
+          <div className="max-w-6xl mx-auto px-4 py-4">
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex-1">
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-lg">🚀</span>
+                  <h3 className="font-semibold text-white">Welcome to Gnomo DEX (Testnet)</h3>
+                  <span className="text-xs bg-[#238636] px-2 py-0.5 rounded-full">Beta</span>
+                </div>
+                <div className="grid md:grid-cols-4 gap-4 text-sm">
+                  <div className="bg-[#0d1117]/50 rounded-lg p-3">
+                    <div className="font-medium text-[#58a6ff] mb-1">Step 1: Wallet</div>
+                    <p className="text-[#8b949e]">Install <a href="https://adena.app" target="_blank" rel="noopener" className="text-[#58a6ff] hover:underline">Adena Wallet</a> and create an account</p>
+                  </div>
+                  <div className="bg-[#0d1117]/50 rounded-lg p-3">
+                    <div className="font-medium text-[#58a6ff] mb-1">Step 2: Network</div>
+                    <p className="text-[#8b949e]">Connect wallet - it will auto-add the Staging network</p>
+                  </div>
+                  <div className="bg-[#0d1117]/50 rounded-lg p-3">
+                    <div className="font-medium text-[#58a6ff] mb-1">Step 3: Get GNOT</div>
+                    <p className="text-[#8b949e]">Get test GNOT from <a href="https://faucet.gno.land" target="_blank" rel="noopener" className="text-[#58a6ff] hover:underline">faucet.gno.land</a> → Staging</p>
+                  </div>
+                  <div className="bg-[#0d1117]/50 rounded-lg p-3">
+                    <div className="font-medium text-[#58a6ff] mb-1">Step 4: Mint Tokens</div>
+                    <p className="text-[#8b949e]">Go to Pool → Create tab and click "Mint Test Tokens"</p>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGettingStarted(false)}
+                className="text-[#8b949e] hover:text-white p-1 hover:bg-[#21262d] rounded transition"
+                title="Dismiss"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="max-w-6xl mx-auto px-4 py-8">
         {activeTab === 'swap' && (
