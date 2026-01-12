@@ -91,14 +91,15 @@ func CreatePool(_ realm, denomA, denomB string, feeBPS int64) uint64 {
 
 // AddLiquidity adds liquidity to a pool
 // User must send both tokens with the transaction
-func AddLiquidity(_ realm, poolID uint64) int64 {
+// minLPOut provides slippage protection - set to 0 to skip
+func AddLiquidity(_ realm, poolID uint64, minLPOut int64) int64 {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
 	}
 
 	p := pools[poolID]
 	caller := string(runtime.OriginCaller())
-	
+
 	sentCoins := banker.OriginSend()
 	amountA := sentCoins.AmountOf(p.DenomA)
 	amountB := sentCoins.AmountOf(p.DenomB)
@@ -110,17 +111,24 @@ func AddLiquidity(_ realm, poolID uint64) int64 {
 	var lpMinted int64
 
 	if p.TotalLP == 0 {
-		lpMinted = sqrt64(amountA * amountB)
+		// Use safe multiplication for initial liquidity
+		lpMinted = sqrt64(safeMul(amountA, amountB))
 		if lpMinted == 0 {
 			panic("insufficient initial liquidity")
 		}
 	} else {
-		lpFromA := (amountA * p.TotalLP) / p.ReserveA
-		lpFromB := (amountB * p.TotalLP) / p.ReserveB
+		// Use safeMulDiv to prevent overflow
+		lpFromA := safeMulDiv(amountA, p.TotalLP, p.ReserveA)
+		lpFromB := safeMulDiv(amountB, p.TotalLP, p.ReserveB)
 		lpMinted = min64(lpFromA, lpFromB)
 		if lpMinted == 0 {
 			panic("insufficient liquidity minted")
 		}
+	}
+
+	// Slippage protection
+	if minLPOut > 0 && lpMinted < minLPOut {
+		panic("slippage: LP minted " + strconv.FormatInt(lpMinted, 10) + " < min " + strconv.FormatInt(minLPOut, 10))
 	}
 
 	p.ReserveA += amountA
@@ -132,7 +140,8 @@ func AddLiquidity(_ realm, poolID uint64) int64 {
 }
 
 // RemoveLiquidity burns LP tokens and returns proportional reserves
-func RemoveLiquidity(_ realm, poolID uint64, lpAmount int64) {
+// minAmountA/minAmountB provide slippage protection - set to 0 to skip
+func RemoveLiquidity(_ realm, poolID uint64, lpAmount int64, minAmountA int64, minAmountB int64) {
 	if poolID >= uint64(len(pools)) {
 		panic("pool not found")
 	}
@@ -143,16 +152,25 @@ func RemoveLiquidity(_ realm, poolID uint64, lpAmount int64) {
 	p := pools[poolID]
 	caller := string(runtime.OriginCaller())
 	callerLP := lpBalances[poolID][caller]
-	
+
 	if callerLP < lpAmount {
 		panic("insufficient LP balance")
 	}
 
-	amountA := (lpAmount * p.ReserveA) / p.TotalLP
-	amountB := (lpAmount * p.ReserveB) / p.TotalLP
+	// Use safeMulDiv to prevent overflow
+	amountA := safeMulDiv(lpAmount, p.ReserveA, p.TotalLP)
+	amountB := safeMulDiv(lpAmount, p.ReserveB, p.TotalLP)
 
 	if amountA <= 0 || amountB <= 0 {
 		panic("insufficient output amounts")
+	}
+
+	// Slippage protection
+	if minAmountA > 0 && amountA < minAmountA {
+		panic("slippage: amountA " + strconv.FormatInt(amountA, 10) + " < min " + strconv.FormatInt(minAmountA, 10))
+	}
+	if minAmountB > 0 && amountB < minAmountB {
+		panic("slippage: amountB " + strconv.FormatInt(amountB, 10) + " < min " + strconv.FormatInt(minAmountB, 10))
 	}
 
 	p.ReserveA -= amountA
@@ -190,7 +208,7 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 
 	var amountIn int64
 	var denomOut string
-	
+
 	if tokenIn == "A" {
 		denomOut = p.DenomB
 		amountIn = sentCoins.AmountOf(p.DenomA)
@@ -204,14 +222,15 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 	}
 
 	var amountOut int64
-	amountInWithFee := (amountIn * (10000 - p.FeeBPS)) / 10000
+	amountInWithFee := safeMulDiv(amountIn, 10000-p.FeeBPS, 10000)
 
 	if tokenIn == "A" {
-		amountOut = (amountInWithFee * p.ReserveB) / (p.ReserveA + amountInWithFee)
+		// amountOut = (amountInWithFee * reserveB) / (reserveA + amountInWithFee)
+		amountOut = safeMulDiv(amountInWithFee, p.ReserveB, p.ReserveA+amountInWithFee)
 		p.ReserveA += amountIn
 		p.ReserveB -= amountOut
 	} else {
-		amountOut = (amountInWithFee * p.ReserveA) / (p.ReserveB + amountInWithFee)
+		amountOut = safeMulDiv(amountInWithFee, p.ReserveA, p.ReserveB+amountInWithFee)
 		p.ReserveB += amountIn
 		p.ReserveA -= amountOut
 	}
@@ -225,7 +244,7 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 
 	bnk := banker.NewBanker(banker.BankerTypeRealmSend)
 	realmAddr := runtime.CurrentRealm().Address()
-	
+
 	outCoins := chain.NewCoins(chain.NewCoin(denomOut, amountOut))
 	bnk.SendCoins(realmAddr, caller, outCoins)
 
@@ -242,12 +261,12 @@ func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 		return 0
 	}
 
-	amountInWithFee := (amountIn * (10000 - p.FeeBPS)) / 10000
+	amountInWithFee := safeMulDiv(amountIn, 10000-p.FeeBPS, 10000)
 
 	if tokenIn == "A" {
-		return (amountInWithFee * p.ReserveB) / (p.ReserveA + amountInWithFee)
+		return safeMulDiv(amountInWithFee, p.ReserveB, p.ReserveA+amountInWithFee)
 	}
-	return (amountInWithFee * p.ReserveA) / (p.ReserveB + amountInWithFee)
+	return safeMulDiv(amountInWithFee, p.ReserveA, p.ReserveB+amountInWithFee)
 }
 
 // GetPool returns pool info
@@ -293,6 +312,35 @@ func min64(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+// Safe math to prevent overflow
+const MAX_INT64 = int64(9223372036854775807)
+
+func safeMul(a, b int64) int64 {
+	if a == 0 || b == 0 {
+		return 0
+	}
+	result := a * b
+	// Check for overflow: if result/a != b, overflow occurred
+	if result/a != b {
+		panic("multiplication overflow")
+	}
+	return result
+}
+
+func safeMulDiv(a, b, c int64) int64 {
+	if c == 0 {
+		panic("division by zero")
+	}
+	// For large numbers, divide first to avoid overflow
+	// Use: (a * b) / c = (a / c) * b + (a % c) * b / c
+	if a > MAX_INT64/b && b != 0 {
+		quotient := a / c
+		remainder := a % c
+		return quotient*b + (remainder*b)/c
+	}
+	return (a * b) / c
 }
 
 // Render displays pool information

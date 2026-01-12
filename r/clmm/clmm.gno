@@ -16,7 +16,35 @@ const (
 	MIN_TICK  = -1000
 	MAX_TICK  = 1000
 	PRECISION = 1000000
+	MAX_INT64 = int64(9223372036854775807)
 )
+
+// =============================================================================
+// SAFE MATH
+// =============================================================================
+
+func safeMul(a, b int64) int64 {
+	if a == 0 || b == 0 {
+		return 0
+	}
+	result := a * b
+	if result/a != b {
+		panic("multiplication overflow")
+	}
+	return result
+}
+
+func safeMulDiv(a, b, c int64) int64 {
+	if c == 0 {
+		panic("division by zero")
+	}
+	if a > MAX_INT64/b && b != 0 {
+		quotient := a / c
+		remainder := a % c
+		return quotient*b + (remainder*b)/c
+	}
+	return (a * b) / c
+}
 
 // =============================================================================
 // DATA STRUCTURES
@@ -86,18 +114,21 @@ func getPriceAtTick(tick int64) int64 {
 
 	// Use 1.01 per tick (1% price change per tick)
 	// Calculate 1.01^absTick using simple iteration
-	// This is O(n) but safe from overflow for reasonable tick values
 	result := int64(PRECISION) // 1.0 in X6
 
 	for i := int64(0); i < absTick; i++ {
 		// result = result * 1.01 = result * 101 / 100
+		// Check for overflow before multiplication
+		if result > MAX_INT64/101 {
+			panic("price calculation overflow")
+		}
 		result = (result * 101) / 100
 	}
 
 	if tick < 0 {
 		// Invert: 1 / price = PRECISION^2 / result
 		if result > 0 {
-			return (PRECISION * PRECISION) / result
+			return safeMulDiv(PRECISION, PRECISION, result)
 		}
 		return PRECISION
 	}
@@ -133,14 +164,25 @@ func getTickAtPrice(priceX6 int64) int64 {
 
 func getAmountsForLiquidity(pL, pU, pC, liq int64) (int64, int64) {
 	if pC <= pL {
-		amt0 := (liq * (pU - pL)) / ((pL * pU) / PRECISION)
+		// Price below range: all token0
+		denominator := safeMulDiv(pL, pU, PRECISION)
+		if denominator == 0 {
+			return 0, 0
+		}
+		amt0 := safeMulDiv(liq, pU-pL, denominator)
 		return amt0, 0
 	} else if pC >= pU {
-		amt1 := (liq * (pU - pL)) / PRECISION
+		// Price above range: all token1
+		amt1 := safeMulDiv(liq, pU-pL, PRECISION)
 		return 0, amt1
 	} else {
-		amt0 := (liq * (pU - pC)) / ((pC * pU) / PRECISION)
-		amt1 := (liq * (pC - pL)) / PRECISION
+		// Price in range: mix of both tokens
+		denominator := safeMulDiv(pC, pU, PRECISION)
+		if denominator == 0 {
+			return 0, 0
+		}
+		amt0 := safeMulDiv(liq, pU-pC, denominator)
+		amt1 := safeMulDiv(liq, pC-pL, PRECISION)
 		return amt0, amt1
 	}
 }
@@ -150,15 +192,17 @@ func getLiquidityForAmounts(pL, pU, pC, amt0, amt1 int64) int64 {
 		if amt0 <= 0 {
 			return 0
 		}
-		return (amt0 * ((pL * pU) / PRECISION)) / (pU - pL)
+		numerator := safeMulDiv(pL, pU, PRECISION)
+		return safeMulDiv(amt0, numerator, pU-pL)
 	} else if pC >= pU {
 		if amt1 <= 0 {
 			return 0
 		}
-		return (amt1 * PRECISION) / (pU - pL)
+		return safeMulDiv(amt1, PRECISION, pU-pL)
 	} else {
-		liq0 := (amt0 * ((pC * pU) / PRECISION)) / (pU - pC)
-		liq1 := (amt1 * PRECISION) / (pC - pL)
+		numerator0 := safeMulDiv(pC, pU, PRECISION)
+		liq0 := safeMulDiv(amt0, numerator0, pU-pC)
+		liq1 := safeMulDiv(amt1, PRECISION, pC-pL)
 		if liq0 < liq1 {
 			return liq0
 		}
@@ -374,40 +418,108 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 		panic("must send input token")
 	}
 
-	// Calculate fee
-	feeAmount := (amountIn * pool.FeeBPS) / 10000
-	amountAfterFee := amountIn - feeAmount
+	// Calculate fee using safe math
+	feeAmount := safeMulDiv(amountIn, pool.FeeBPS, 10000)
+	amountRemaining := amountIn - feeAmount
+	totalAmountOut := int64(0)
 
-	// Accumulate fees
-	if pool.Liquidity > 0 {
+	// Process swap with tick crossing
+	maxIterations := 100 // Safety limit to prevent infinite loops
+	for i := 0; i < maxIterations && amountRemaining > 0; i++ {
+		if pool.Liquidity == 0 {
+			break // No more liquidity
+		}
+
+		// Find next initialized tick in the direction of swap
+		nextTick := findNextInitializedTick(poolID, pool.CurrentTick, zeroForOne)
+
+		// Calculate how much we can swap before hitting the next tick
+		var amountInStep, amountOutStep int64
+		var nextTickPrice int64
+
 		if zeroForOne {
-			pool.FeeGrowthA += (feeAmount * PRECISION) / pool.Liquidity
-		} else {
-			pool.FeeGrowthB += (feeAmount * PRECISION) / pool.Liquidity
-		}
-	}
+			// Swapping A for B (price decreases)
+			nextTickPrice = getPriceAtTick(nextTick)
+			if nextTickPrice < getPriceAtTick(MIN_TICK) {
+				nextTickPrice = getPriceAtTick(MIN_TICK)
+			}
 
-	// Calculate output
-	var amountOut int64
-	if zeroForOne {
-		amountOut = (amountAfterFee * pool.PriceX6) / PRECISION
-		newPrice := pool.PriceX6 - (amountOut * PRECISION / pool.Liquidity)
-		if newPrice < getPriceAtTick(MIN_TICK) {
-			newPrice = getPriceAtTick(MIN_TICK)
+			// Calculate max input to reach next tick
+			priceDiff := pool.PriceX6 - nextTickPrice
+			if priceDiff <= 0 {
+				break
+			}
+
+			// Max amount that can be swapped at current liquidity to reach nextTickPrice
+			maxAmountIn := safeMulDiv(pool.Liquidity, priceDiff, pool.PriceX6)
+
+			if amountRemaining <= maxAmountIn {
+				// Swap completes within this tick range
+				amountInStep = amountRemaining
+				amountOutStep = safeMulDiv(amountInStep, pool.PriceX6, PRECISION)
+				// Update price proportionally
+				priceChange := safeMulDiv(amountInStep, pool.PriceX6, pool.Liquidity)
+				pool.PriceX6 -= priceChange
+				if pool.PriceX6 < getPriceAtTick(MIN_TICK) {
+					pool.PriceX6 = getPriceAtTick(MIN_TICK)
+				}
+			} else {
+				// Swap crosses this tick
+				amountInStep = maxAmountIn
+				amountOutStep = safeMulDiv(amountInStep, pool.PriceX6, PRECISION)
+				pool.PriceX6 = nextTickPrice
+
+				// Cross the tick - update liquidity
+				crossTick(poolID, nextTick, zeroForOne)
+			}
+		} else {
+			// Swapping B for A (price increases)
+			nextTickPrice = getPriceAtTick(nextTick)
+			if nextTickPrice > getPriceAtTick(MAX_TICK) {
+				nextTickPrice = getPriceAtTick(MAX_TICK)
+			}
+
+			priceDiff := nextTickPrice - pool.PriceX6
+			if priceDiff <= 0 {
+				break
+			}
+
+			maxAmountIn := safeMulDiv(pool.Liquidity, priceDiff, PRECISION)
+
+			if amountRemaining <= maxAmountIn {
+				amountInStep = amountRemaining
+				amountOutStep = safeMulDiv(amountInStep, PRECISION, pool.PriceX6)
+				priceChange := safeMulDiv(amountInStep, PRECISION, pool.Liquidity)
+				pool.PriceX6 += priceChange
+				if pool.PriceX6 > getPriceAtTick(MAX_TICK) {
+					pool.PriceX6 = getPriceAtTick(MAX_TICK)
+				}
+			} else {
+				amountInStep = maxAmountIn
+				amountOutStep = safeMulDiv(amountInStep, PRECISION, pool.PriceX6)
+				pool.PriceX6 = nextTickPrice
+
+				crossTick(poolID, nextTick, zeroForOne)
+			}
 		}
-		pool.PriceX6 = newPrice
-	} else {
-		amountOut = (amountAfterFee * PRECISION) / pool.PriceX6
-		newPrice := pool.PriceX6 + (amountAfterFee * PRECISION / pool.Liquidity)
-		if newPrice > getPriceAtTick(MAX_TICK) {
-			newPrice = getPriceAtTick(MAX_TICK)
+
+		amountRemaining -= amountInStep
+		totalAmountOut += amountOutStep
+
+		// Accumulate fees for this step (proportional to amount used)
+		if pool.Liquidity > 0 {
+			stepFee := safeMulDiv(feeAmount, amountInStep, amountIn-feeAmount)
+			if zeroForOne {
+				pool.FeeGrowthA += safeMulDiv(stepFee, PRECISION, pool.Liquidity)
+			} else {
+				pool.FeeGrowthB += safeMulDiv(stepFee, PRECISION, pool.Liquidity)
+			}
 		}
-		pool.PriceX6 = newPrice
 	}
 
 	pool.CurrentTick = getTickAtPrice(pool.PriceX6)
 
-	if amountOut < minAmountOut {
+	if totalAmountOut < minAmountOut {
 		panic("slippage exceeded")
 	}
 
@@ -422,9 +534,71 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 		denomOut = pool.DenomA
 	}
 
-	bnk.SendCoins(realmAddr, caller, chain.NewCoins(chain.NewCoin(denomOut, amountOut)))
+	bnk.SendCoins(realmAddr, caller, chain.NewCoins(chain.NewCoin(denomOut, totalAmountOut)))
 
-	return amountOut
+	return totalAmountOut
+}
+
+// findNextInitializedTick finds the next tick with liquidity in the swap direction
+func findNextInitializedTick(poolID uint64, currentTick int64, zeroForOne bool) int64 {
+	ticks := tickData[poolID]
+	if ticks == nil {
+		if zeroForOne {
+			return MIN_TICK
+		}
+		return MAX_TICK
+	}
+
+	pool := pools[poolID]
+	spacing := pool.TickSpacing
+
+	if zeroForOne {
+		// Going down (price decreasing), look for next lower initialized tick
+		for tick := currentTick - spacing; tick >= MIN_TICK; tick -= spacing {
+			if info := ticks[tick]; info != nil && info.Initialized {
+				return tick
+			}
+		}
+		return MIN_TICK
+	} else {
+		// Going up (price increasing), look for next higher initialized tick
+		for tick := currentTick + spacing; tick <= MAX_TICK; tick += spacing {
+			if info := ticks[tick]; info != nil && info.Initialized {
+				return tick
+			}
+		}
+		return MAX_TICK
+	}
+}
+
+// crossTick updates liquidity when crossing a tick boundary
+func crossTick(poolID uint64, tick int64, zeroForOne bool) {
+	ticks := tickData[poolID]
+	if ticks == nil {
+		return
+	}
+
+	info := ticks[tick]
+	if info == nil || !info.Initialized {
+		return
+	}
+
+	pool := pools[poolID]
+
+	// When crossing a tick from left to right (price increasing), add liquidityNet
+	// When crossing from right to left (price decreasing), subtract liquidityNet
+	if zeroForOne {
+		// Price decreasing, crossing tick from above
+		pool.Liquidity -= info.LiquidityNet
+	} else {
+		// Price increasing, crossing tick from below
+		pool.Liquidity += info.LiquidityNet
+	}
+
+	// Ensure liquidity doesn't go negative
+	if pool.Liquidity < 0 {
+		pool.Liquidity = 0
+	}
 }
 
 // =============================================================================
@@ -454,8 +628,9 @@ func CollectFees(_ realm, positionID uint64) (int64, int64) {
 		feeGrowthDeltaA := pool.FeeGrowthA - pos.FeeGrowthLastA
 		feeGrowthDeltaB := pool.FeeGrowthB - pos.FeeGrowthLastB
 
-		feesA = (feeGrowthDeltaA * pos.Liquidity) / PRECISION
-		feesB = (feeGrowthDeltaB * pos.Liquidity) / PRECISION
+		// Use safe math to prevent overflow
+		feesA = safeMulDiv(feeGrowthDeltaA, pos.Liquidity, PRECISION)
+		feesB = safeMulDiv(feeGrowthDeltaB, pos.Liquidity, PRECISION)
 
 		// Update position's last fee growth snapshot
 		pos.FeeGrowthLastA = pool.FeeGrowthA
@@ -505,8 +680,9 @@ func GetPositionFees(positionID uint64) (int64, int64) {
 		feeGrowthDeltaA := pool.FeeGrowthA - pos.FeeGrowthLastA
 		feeGrowthDeltaB := pool.FeeGrowthB - pos.FeeGrowthLastB
 
-		feesA = (feeGrowthDeltaA * pos.Liquidity) / PRECISION
-		feesB = (feeGrowthDeltaB * pos.Liquidity) / PRECISION
+		// Use safe math to prevent overflow
+		feesA = safeMulDiv(feeGrowthDeltaA, pos.Liquidity, PRECISION)
+		feesB = safeMulDiv(feeGrowthDeltaB, pos.Liquidity, PRECISION)
 	}
 
 	feesA += pos.TokensOwedA
@@ -591,13 +767,14 @@ func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 		return 0
 	}
 
-	feeAmount := (amountIn * pool.FeeBPS) / 10000
+	// Use safe math to prevent overflow
+	feeAmount := safeMulDiv(amountIn, pool.FeeBPS, 10000)
 	amountAfterFee := amountIn - feeAmount
 
 	if tokenIn == "A" {
-		return (amountAfterFee * pool.PriceX6) / PRECISION
+		return safeMulDiv(amountAfterFee, pool.PriceX6, PRECISION)
 	} else if tokenIn == "B" {
-		return (amountAfterFee * PRECISION) / pool.PriceX6
+		return safeMulDiv(amountAfterFee, PRECISION, pool.PriceX6)
 	}
 	return 0
 }

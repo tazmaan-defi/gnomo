@@ -241,6 +241,7 @@ export async function addLiquidity(params: {
   amountB: bigint;
   denomA: string;
   denomB: string;
+  minLPOut?: bigint; // Slippage protection: minimum LP tokens to receive (0 = no protection)
 }): Promise<AdenaResponse> {
   // Format send string with both tokens
   const sendStr = `${params.amountA}${params.denomA},${params.amountB}${params.denomB}`;
@@ -249,7 +250,7 @@ export async function addLiquidity(params: {
     caller: params.caller,
     pkgPath: PKG_PATH,
     func: 'AddLiquidity',
-    args: [params.poolId.toString()],
+    args: [params.poolId.toString(), (params.minLPOut || 0n).toString()],
     send: sendStr,
     gasWanted: 5000000,
     gasFee: 1000000,
@@ -261,12 +262,19 @@ export async function removeLiquidity(params: {
   caller: string;
   poolId: number;
   lpAmount: bigint;
+  minAmountA?: bigint; // Slippage protection: minimum token A to receive (0 = no protection)
+  minAmountB?: bigint; // Slippage protection: minimum token B to receive (0 = no protection)
 }): Promise<AdenaResponse> {
   return executeContract({
     caller: params.caller,
     pkgPath: PKG_PATH,
     func: 'RemoveLiquidity',
-    args: [params.poolId.toString(), params.lpAmount.toString()],
+    args: [
+      params.poolId.toString(),
+      params.lpAmount.toString(),
+      (params.minAmountA || 0n).toString(),
+      (params.minAmountB || 0n).toString(),
+    ],
     gasWanted: 5000000,
     gasFee: 1000000,
   });
