@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { getAllPools, getQuote, formatDenom, formatAmount, calculatePrice, PoolInfo, getLPBalance } from '@/lib/gno'
+import { getAllPools, getQuote, formatDenom, PoolInfo, getLPBalance } from '@/lib/gno'
 import {
   isAdenaInstalled,
   connectAdena,
@@ -32,6 +32,18 @@ import {
   tickToPrice,
   priceToTick,
 } from '@/lib/clmm'
+import {
+  useToast,
+  ConfirmModal,
+  PoolCardSkeleton,
+  PositionCardSkeleton,
+  Tooltip,
+  HelpTooltip,
+  CLMM_TOOLTIPS,
+  NoPoolsEmpty,
+  NoPositionsEmpty,
+  WalletNotConnectedEmpty,
+} from '@/components'
 
 type BestQuoteResult = {
   pool: PoolInfo | null
@@ -41,10 +53,29 @@ type BestQuoteResult = {
   tokenIn: 'A' | 'B'
 }
 
-// Helper to format token amounts with 6 decimals
-function fmtAmt(amount: bigint): string {
+// Helper to format token amounts with 6 decimals and commas
+function fmtAmt(amount: bigint, maxDecimals = 6): string {
   const num = Number(amount) / 1_000_000
-  return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 6 })
+  if (num === 0) return '0'
+  if (num < 0.000001) return '<0.000001'
+
+  // Use Intl for proper comma formatting
+  const formatted = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: maxDecimals,
+  }).format(num)
+
+  return formatted
+}
+
+// Format with $ sign for USD values
+function fmtUSD(amount: number): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(amount)
 }
 
 // Helper to calculate simple price ratio
@@ -55,11 +86,28 @@ function calcPrice(reserveA: bigint, reserveB: bigint): string {
 }
 
 export default function Home() {
+  const toast = useToast()
+
   const [activeTab, setActiveTab] = useState<'swap' | 'pool' | 'clmm'>('swap')
   const [pools, setPools] = useState<PoolInfo[]>([])
   const [loading, setLoading] = useState(true)
   const [quoteLoading, setQuoteLoading] = useState(false)
   const [swapLoading, setSwapLoading] = useState(false)
+
+  // Confirmation modal state
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    description?: string
+    details?: { label: string; value: string }[]
+    confirmText?: string
+    confirmVariant?: 'primary' | 'danger'
+    onConfirm: () => Promise<void>
+  }>({
+    isOpen: false,
+    title: '',
+    onConfirm: async () => {},
+  })
   
   const [fromToken, setFromToken] = useState<string>('')
   const [toToken, setToToken] = useState<string>('')
@@ -382,19 +430,19 @@ export default function Home() {
       }
 
       if (result.code === 0) {
-        alert('Swap successful!')
+        toast.success('Swap Successful', `${fromAmount} ${formatDenom(fromToken)} → ${toAmount} ${formatDenom(toToken)}`)
         setFromAmount('')
         setToAmount('')
         setBestQuote(null)
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Swap failed: ${result.message || 'Unknown error'}`)
+        toast.error('Swap Failed', result.message || 'Unknown error')
       }
     } catch (error) {
       console.error('Swap error:', error)
       const msg = error instanceof Error ? error.message : ''
       if (!msg.includes('rejected') && !msg.includes('timed out')) {
-        alert(msg || 'Swap failed')
+        toast.error('Swap Failed', msg || 'Transaction failed')
       }
     } finally {
       setSwapLoading(false)
@@ -551,18 +599,18 @@ export default function Home() {
         denomB: selectedPool.denomB,
       })
       if (result.code === 0) {
-        alert('Liquidity added successfully!')
+        toast.success('Liquidity Added', `Added ${amountA} ${formatDenom(selectedPool.denomA)} and ${amountB} ${formatDenom(selectedPool.denomB)}`)
         setAmountA('')
         setAmountB('')
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Failed: ${result.message || 'Unknown error'}`)
+        toast.error('Add Liquidity Failed', result.message || 'Unknown error')
       }
     } catch (error) {
       console.error('Add liquidity error:', error)
       const msg = error instanceof Error ? error.message : ''
       if (!msg.includes('rejected') && !msg.includes('timed out')) {
-        alert(msg || 'Failed to add liquidity')
+        toast.error('Add Liquidity Failed', msg || 'Transaction failed')
       }
     } finally {
       setActionLoading(false)
@@ -580,18 +628,18 @@ export default function Home() {
         lpAmount: lpAmt,
       })
       if (result.code === 0) {
-        alert('Liquidity removed successfully!')
+        toast.success('Liquidity Removed', 'Your tokens have been returned to your wallet')
         setLpAmount('')
         setSelectedPercent(null)
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Failed: ${result.message || 'Unknown error'}`)
+        toast.error('Remove Liquidity Failed', result.message || 'Unknown error')
       }
     } catch (error) {
       console.error('Remove liquidity error:', error)
       const msg = error instanceof Error ? error.message : ''
       if (!msg.includes('rejected') && !msg.includes('timed out')) {
-        alert(msg || 'Failed to remove liquidity')
+        toast.error('Remove Liquidity Failed', msg || 'Transaction failed')
       }
     } finally {
       setActionLoading(false)
@@ -611,16 +659,17 @@ export default function Home() {
         initialPriceX6: priceX6,
       })
       if (result.code === 0) {
-        alert('CLMM Pool created! Now add a position.')
+        toast.success('CLMM Pool Created', 'Now add a position to start earning fees')
         setNewClmmTokenB('')
         setNewClmmInitialPrice('1')
         setClmmTab('pools')
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Failed: ${result.message}`)
+        toast.error('Create Pool Failed', result.message)
       }
     } catch (e) {
       console.error('Create CLMM pool error:', e)
+      toast.error('Create Pool Failed', 'Transaction failed')
     } finally {
       setClmmLoading(false)
     }
@@ -643,16 +692,17 @@ export default function Home() {
         denomB: selectedClmmPool.denomB,
       })
       if (result.code === 0) {
-        alert('Position created!')
+        toast.success('Position Created', `Range: ${mintPriceLower} - ${mintPriceUpper}`)
         setMintAmountA('')
         setMintAmountB('')
         setClmmTab('positions')
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Failed: ${result.message}`)
+        toast.error('Create Position Failed', result.message)
       }
     } catch (e) {
       console.error('Mint position error:', e)
+      toast.error('Create Position Failed', 'Transaction failed')
     } finally {
       setClmmLoading(false)
     }
@@ -667,13 +717,14 @@ export default function Home() {
         positionId,
       })
       if (result.code === 0) {
-        alert('Position closed!')
+        toast.success('Position Closed', 'Liquidity returned to your wallet')
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Failed: ${result.message}`)
+        toast.error('Close Position Failed', result.message)
       }
     } catch (e) {
       console.error('Burn position error:', e)
+      toast.error('Close Position Failed', 'Transaction failed')
     } finally {
       setClmmLoading(false)
     }
@@ -688,26 +739,62 @@ export default function Home() {
         positionId,
       })
       if (result.code === 0) {
-        alert('Fees collected!')
+        toast.success('Fees Collected', 'Trading fees sent to your wallet')
         await onRefresh()
       } else if (result.code !== 4001 && result.code !== 4000) {
-        alert(`Failed: ${result.message}`)
+        toast.error('Collect Fees Failed', result.message)
       }
     } catch (e) {
       console.error('Collect fees error:', e)
+      toast.error('Collect Fees Failed', 'Transaction failed')
     } finally {
       setClmmLoading(false)
     }
   }
 
   const rpcStatus = pools.length > 0 || !loading
-  const totalTVL = pools.reduce((sum, pool) => sum + Number(pool.reserveA) + Number(pool.reserveB), 0)
+
+  // Calculate total TVL across V2 and CLMM pools in USD
+  // Assuming GNOT = $1 for simplicity (or use actual price feed)
+  const GNOT_PRICE_USD = 1 // Could be fetched from oracle
+  const v2TvlUsd = pools.reduce((sum, pool) => {
+    // For V2 pools, TVL = 2 * reserveA (assuming A is the base token valued at $1)
+    // Or if denomA is ugnot, use that as the value anchor
+    const reserveAUsd = Number(pool.reserveA) / 1_000_000 * GNOT_PRICE_USD
+    const reserveBUsd = Number(pool.reserveB) / 1_000_000 * GNOT_PRICE_USD
+    return sum + reserveAUsd + reserveBUsd
+  }, 0)
+
+  // For CLMM, estimate TVL from liquidity (simplified - would need actual position data for accuracy)
+  const clmmTvlUsd = clmmPools.reduce((sum, pool) => {
+    // Rough estimate: liquidity value = liquidity / 1e6 * 2 (both tokens)
+    const liqValue = Number(pool.liquidity) / 1_000_000 * 2 * GNOT_PRICE_USD
+    return sum + liqValue
+  }, 0)
+
+  const totalTVL = v2TvlUsd + clmmTvlUsd
 
   // Helper for fee display - PoolInfo uses feeBps (number)
   const fmtFee = (feeBps: number) => feeBps < 100 ? (feeBps / 100).toFixed(2) : (feeBps / 100).toFixed(1)
 
   return (
     <div className="min-h-screen bg-[#0d1117]">
+      {/* Confirmation Modal */}
+      <ConfirmModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={async () => {
+          await confirmModal.onConfirm()
+          setConfirmModal(prev => ({ ...prev, isOpen: false }))
+        }}
+        title={confirmModal.title}
+        description={confirmModal.description}
+        details={confirmModal.details}
+        confirmText={confirmModal.confirmText}
+        confirmVariant={confirmModal.confirmVariant}
+        loading={swapLoading || actionLoading || clmmLoading}
+      />
+
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
@@ -745,8 +832,11 @@ export default function Home() {
 
               {showSettings && (
                 <div className="mb-4 p-3 bg-[#0d1117] rounded-xl">
-                  <label className="text-sm text-[#8b949e]">Slippage Tolerance</label>
-                  <div className="flex gap-2 mt-2">
+                  <div className="flex items-center gap-2 mb-2">
+                    <label className="text-sm text-[#8b949e]">Slippage Tolerance</label>
+                    <HelpTooltip content={CLMM_TOOLTIPS.slippage} />
+                  </div>
+                  <div className="flex gap-2">
                     {[10, 50, 100, 200].map((bps) => (
                       <button key={bps} onClick={() => setSlippageBps(bps)} className={`px-3 py-1.5 rounded-lg text-sm font-medium transition ${slippageBps === bps ? 'bg-[#238636] text-white' : 'bg-[#21262d] text-[#8b949e] hover:text-white'}`}>{(bps / 100).toFixed(1)}%</button>
                     ))}
@@ -760,9 +850,35 @@ export default function Home() {
                     <option value="">Select token</option>
                     {availableTokens().map((token) => <option key={token} value={token}>{formatDenom(token)}</option>)}
                   </select>
-                  <span className="text-sm text-[#8b949e]">Balance: {fromToken ? formatBalance(fromToken) : '0'}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-[#8b949e]">Balance: {fromToken ? formatBalance(fromToken) : '0'}</span>
+                    {fromToken && getBalance(fromToken) > 0n && (
+                      <button
+                        onClick={() => setFromAmount((Number(getBalance(fromToken)) / 1_000_000).toString())}
+                        className="px-2 py-0.5 text-xs font-medium bg-[#238636]/20 text-[#238636] rounded hover:bg-[#238636]/30 transition"
+                      >
+                        MAX
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <input type="text" value={fromAmount} onChange={(e) => setFromAmount(e.target.value)} placeholder="0.00" className="w-full bg-transparent text-3xl font-medium outline-none" />
+                <div className="flex items-center gap-2">
+                  <input type="text" value={fromAmount} onChange={(e) => setFromAmount(e.target.value)} placeholder="0.00" className="w-full bg-transparent text-3xl font-medium outline-none" />
+                  {/* Quick percentage buttons */}
+                  {fromToken && getBalance(fromToken) > 0n && (
+                    <div className="flex gap-1">
+                      {[25, 50, 75].map(pct => (
+                        <button
+                          key={pct}
+                          onClick={() => setFromAmount(((Number(getBalance(fromToken)) / 1_000_000) * pct / 100).toFixed(6))}
+                          className="px-1.5 py-0.5 text-xs text-[#8b949e] hover:text-white bg-[#21262d] hover:bg-[#30363d] rounded transition"
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="flex justify-center -my-2 relative z-10">
@@ -783,72 +899,140 @@ export default function Home() {
                 </div>
               </div>
 
-              {bestQuote && (
-                <div className="mt-3 p-3 bg-[#0d1117] rounded-xl text-sm">
-                  {(matchingPools.length + clmmPools.filter(p => (p.denomA === fromToken && p.denomB === toToken) || (p.denomB === fromToken && p.denomA === toToken)).length) > 1 && (
-                    <p className="text-[#8b949e]">Comparing V2 & CLMM pools for best rate</p>
-                  )}
-                  <div className="flex justify-between items-center mt-1">
-                    <span className="text-[#8b949e]">Best route:</span>
-                    <span className="font-medium">
-                      {bestQuote.poolType === 'v2' && bestQuote.pool && (
-                        <span className="text-[#238636]">V2 {fmtFee(bestQuote.pool.feeBps)}% pool</span>
-                      )}
-                      {bestQuote.poolType === 'clmm' && bestQuote.clmmPool && (
-                        <span className="text-[#58a6ff]">CLMM {(bestQuote.clmmPool.feeBPS / 100).toFixed(2)}% pool</span>
-                      )}
-                    </span>
-                  </div>
-                  {fromAmount && toAmount && (
-                    <div className="flex justify-between text-[#8b949e] mt-1">
-                      <span>Rate</span>
-                      <span>1 {formatDenom(fromToken)} = {(parseFloat(toAmount) / parseFloat(fromAmount)).toFixed(6)} {formatDenom(toToken)}</span>
-                    </div>
-                  )}
-                  {/* Price Impact Warning */}
-                  {fromAmount && toAmount && (() => {
-                    const inputAmt = parseFloat(fromAmount)
-                    const outputAmt = parseFloat(toAmount)
-                    if (inputAmt <= 0 || outputAmt <= 0) return null
+              {bestQuote && fromAmount && toAmount && (() => {
+                const inputAmt = parseFloat(fromAmount)
+                const outputAmt = parseFloat(toAmount)
+                if (inputAmt <= 0 || outputAmt <= 0) return null
 
-                    // Calculate spot price from pool
-                    let spotPrice = 0
-                    if (bestQuote.poolType === 'v2' && bestQuote.pool) {
-                      const pool = bestQuote.pool
-                      if (bestQuote.tokenIn === 'A') {
-                        spotPrice = Number(pool.reserveB) / Number(pool.reserveA)
-                      } else {
-                        spotPrice = Number(pool.reserveA) / Number(pool.reserveB)
-                      }
-                    } else if (bestQuote.poolType === 'clmm' && bestQuote.clmmPool) {
-                      const clmmPrice = Number(bestQuote.clmmPool.priceX6) / 1_000_000
-                      spotPrice = bestQuote.tokenIn === 'A' ? clmmPrice : 1 / clmmPrice
+                // Get fee info
+                const feeBps = bestQuote.poolType === 'v2' && bestQuote.pool
+                  ? bestQuote.pool.feeBps
+                  : bestQuote.clmmPool?.feeBPS || 0
+                const feePercent = feeBps / 100
+                const tradingFee = inputAmt * feeBps / 10000
+
+                // Calculate minimum received based on slippage tolerance
+                const minReceived = outputAmt * (1 - slippageBps / 10000)
+
+                // Calculate TRUE price impact (excluding fee)
+                let priceImpact = 0
+
+                if (bestQuote.poolType === 'v2' && bestQuote.pool) {
+                  const pool = bestQuote.pool
+                  // For V2: use AMM formula but subtract fee contribution
+                  const reserveIn = bestQuote.tokenIn === 'A'
+                    ? Number(pool.reserveA) / 1_000_000
+                    : Number(pool.reserveB) / 1_000_000
+
+                  if (reserveIn > 0) {
+                    // AMM slippage only (fee is shown separately)
+                    priceImpact = (inputAmt / (2 * reserveIn)) * 100
+                  }
+                } else if (bestQuote.poolType === 'clmm' && bestQuote.clmmPool) {
+                  // CLMM: compare execution to expected price after fee
+                  const spotPrice = Number(bestQuote.clmmPool.priceX6) / 1_000_000
+                  const execPrice = outputAmt / inputAmt
+
+                  if (spotPrice > 0) {
+                    // Expected price AFTER fee (to isolate slippage from fee)
+                    const feeMultiplier = 1 - feeBps / 10000
+
+                    if (bestQuote.tokenIn === 'A') {
+                      const expectedAfterFee = spotPrice * feeMultiplier
+                      priceImpact = Math.max(0, ((expectedAfterFee - execPrice) / expectedAfterFee) * 100)
+                    } else {
+                      const spotPriceInverse = 1 / spotPrice
+                      const expectedAfterFee = spotPriceInverse * feeMultiplier
+                      priceImpact = Math.max(0, ((expectedAfterFee - execPrice) / expectedAfterFee) * 100)
                     }
+                  }
+                }
 
-                    if (spotPrice <= 0) return null
+                const impactColor = priceImpact >= 5 ? 'text-[#f85149]' : priceImpact >= 1 ? 'text-[#f0883e]' : 'text-[#238636]'
 
-                    // Execution price from quote
-                    const execPrice = outputAmt / inputAmt
-                    // Price impact = (spot - exec) / spot * 100
-                    const priceImpact = ((spotPrice - execPrice) / spotPrice) * 100
+                return (
+                  <div className="mt-3 p-3 bg-[#0d1117] rounded-xl text-sm space-y-2">
+                    {/* Rate */}
+                    <div className="flex justify-between items-center pb-2 border-b border-[#21262d]">
+                      <span className="text-[#8b949e]">1 {formatDenom(fromToken)} =</span>
+                      <span className="font-medium">{(outputAmt / inputAmt).toFixed(6)} {formatDenom(toToken)}</span>
+                    </div>
 
-                    // Only show if impact > 0.1%
-                    if (priceImpact < 0.1) return null
+                    {/* Route */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#8b949e] flex items-center gap-1">
+                        Route
+                        <HelpTooltip content="The liquidity pool used for this swap" position="right" />
+                      </span>
+                      <span className="font-medium">
+                        {bestQuote.poolType === 'v2' && bestQuote.pool && (
+                          <span className="text-[#238636]">V2 {fmtFee(bestQuote.pool.feeBps)}%</span>
+                        )}
+                        {bestQuote.poolType === 'clmm' && bestQuote.clmmPool && (
+                          <span className="text-[#58a6ff]">CLMM {feePercent.toFixed(2)}%</span>
+                        )}
+                      </span>
+                    </div>
 
-                    const impactColor = priceImpact >= 5 ? 'text-[#f85149]' : priceImpact >= 1 ? 'text-[#f0883e]' : 'text-[#8b949e]'
-                    const bgColor = priceImpact >= 5 ? 'bg-[#f8514926] border border-[#f85149]' : priceImpact >= 1 ? 'bg-[#f0883e26] border border-[#f0883e]' : ''
+                    {/* Trading Fee */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#8b949e] flex items-center gap-1">
+                        Trading Fee
+                        <HelpTooltip content={`${feePercent.toFixed(2)}% fee paid to liquidity providers`} position="right" />
+                      </span>
+                      <span className="text-[#8b949e]">{tradingFee.toFixed(6)} {formatDenom(fromToken)} ({feePercent.toFixed(2)}%)</span>
+                    </div>
 
-                    return (
-                      <div className={`flex justify-between mt-1 ${bgColor ? `mt-2 p-2 rounded-lg ${bgColor}` : ''}`}>
-                        <span className={impactColor}>Price Impact</span>
-                        <span className={`font-medium ${impactColor}`}>
-                          {priceImpact >= 5 && '⚠️ '}{priceImpact.toFixed(2)}%
-                        </span>
+                    {/* Price Impact */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#8b949e] flex items-center gap-1">
+                        Price Impact
+                        <HelpTooltip content="The difference between market price and estimated execution price due to trade size" position="right" />
+                      </span>
+                      <span className={`font-medium ${impactColor}`}>
+                        {priceImpact >= 5 && '⚠️ '}{priceImpact < 0.01 ? '<0.01' : priceImpact.toFixed(2)}%
+                      </span>
+                    </div>
+
+                    {/* Minimum Received */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#8b949e] flex items-center gap-1">
+                        Min. Received
+                        <HelpTooltip content={`Minimum amount you'll receive after ${(slippageBps / 100).toFixed(2)}% slippage tolerance`} position="right" />
+                      </span>
+                      <span className="text-[#8b949e]">{minReceived.toFixed(6)} {formatDenom(toToken)}</span>
+                    </div>
+
+                    {/* Slippage Tolerance */}
+                    <div className="flex justify-between items-center pt-2 border-t border-[#21262d]">
+                      <span className="text-[#8b949e] flex items-center gap-1">
+                        Slippage Tolerance
+                        <HelpTooltip content="Your transaction will revert if the price changes more than this percentage" position="right" />
+                      </span>
+                      <div className="flex items-center gap-1">
+                        {[50, 100, 200].map(bps => (
+                          <button
+                            key={bps}
+                            onClick={() => setSlippageBps(bps)}
+                            className={`px-2 py-0.5 text-xs rounded transition ${slippageBps === bps ? 'bg-[#238636] text-white' : 'bg-[#21262d] text-[#8b949e] hover:text-white'}`}
+                          >
+                            {(bps / 100).toFixed(1)}%
+                          </button>
+                        ))}
                       </div>
-                    )
-                  })()}
-                </div>
-              )}
+                    </div>
+
+                    {/* Network Fee */}
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#8b949e] flex items-center gap-1">
+                        Network Fee
+                        <HelpTooltip content="Estimated gas fee for this transaction" position="right" />
+                      </span>
+                      <span className="text-[#8b949e]">~1 GNOT</span>
+                    </div>
+                  </div>
+                )
+              })()}
 
               {fromToken && toToken && !bestQuote && !quoteLoading && matchingPools.length === 0 && clmmPools.filter(p => (p.denomA === fromToken && p.denomB === toToken) || (p.denomB === fromToken && p.denomA === toToken)).length === 0 && (
                 <div className="mt-3 p-3 bg-[#f8514926] border border-[#f85149] rounded-xl text-sm text-[#f85149]">
@@ -856,9 +1040,20 @@ export default function Home() {
                 </div>
               )}
 
-              <button onClick={handleSwap} disabled={!walletAddress || !bestQuote || swapLoading} className={`w-full mt-4 py-4 rounded-xl font-semibold text-lg transition ${walletAddress && bestQuote && !swapLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
-                {swapLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Swapping...</span> : !walletAddress ? 'Connect Wallet' : !fromToken || !toToken ? 'Select Tokens' : !fromAmount ? 'Enter Amount' : !bestQuote && !quoteLoading ? 'No Pool Available' : !bestQuote ? 'Finding Best Rate...' : 'Swap'}
-              </button>
+              {(() => {
+                const insufficientBalance = fromToken && fromAmount && parseFloat(fromAmount) > 0 &&
+                  parseFloat(fromAmount) * 1_000_000 > Number(getBalance(fromToken))
+                const canSwap = walletAddress && bestQuote && !swapLoading && !insufficientBalance
+                return (
+                  <button
+                    onClick={handleSwap}
+                    disabled={!canSwap}
+                    className={`w-full mt-4 py-4 rounded-xl font-semibold text-lg transition ${canSwap ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : insufficientBalance ? 'bg-[#f8514926] text-[#f85149] border border-[#f85149] cursor-not-allowed' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}
+                  >
+                    {swapLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Swapping...</span> : insufficientBalance ? 'Insufficient Balance' : !walletAddress ? 'Connect Wallet' : !fromToken || !toToken ? 'Select Tokens' : !fromAmount ? 'Enter Amount' : !bestQuote && !quoteLoading ? 'No Pool Available' : !bestQuote ? 'Finding Best Rate...' : 'Swap'}
+                  </button>
+                )
+              })()}
             </div>
           </div>
         )}
@@ -874,11 +1069,18 @@ export default function Home() {
 
               {activePoolTab === 'pools' && (
                 <div className="space-y-4">
-                  {loading ? <div className="text-center py-8 text-[#8b949e]">Loading pools...</div> : pools.length === 0 ? <div className="text-center py-8 text-[#8b949e]">No pools yet. Create one!</div> : pools.map((pool) => {
+                  {loading ? (
+                    <>
+                      <PoolCardSkeleton />
+                      <PoolCardSkeleton />
+                    </>
+                  ) : pools.length === 0 ? (
+                    <NoPoolsEmpty onCreate={() => setActivePoolTab('create')} />
+                  ) : pools.map((pool) => {
                     const share = getUserPoolShare(pool.id, pool)
                     const value = getUserPoolValue(pool.id, pool)
                     return (
-                      <div key={pool.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d]">
+                      <div key={pool.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d] card-hover">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <div className="flex -space-x-2"><TokenIcon token={formatDenom(pool.denomA)} /><TokenIcon token={formatDenom(pool.denomB)} /></div>
@@ -895,7 +1097,7 @@ export default function Home() {
                         <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm">
                           <div className="flex justify-between">
                             <span className="text-[#8b949e]">TVL</span>
-                            <span className="font-medium text-[#238636]">~{(Number(pool.reserveA) / 1_000_000 * 2).toFixed(2)} {formatDenom(pool.denomA)}</span>
+                            <span className="font-medium text-[#238636]">~${((Number(pool.reserveA) + Number(pool.reserveB)) / 1_000_000).toFixed(2)}</span>
                           </div>
                         </div>
                         {share > 0 && (
@@ -976,7 +1178,7 @@ export default function Home() {
                   <div><label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label><input type="text" value={newTokenA} onChange={(e) => setNewTokenA(e.target.value)} placeholder="ugnot" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newTokenB} onChange={(e) => setNewTokenB(e.target.value)} placeholder="/gno.land/r/dev/gnomo:usdc" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label><div className="grid grid-cols-3 gap-2">{[5, 10, 30, 50, 100, 200].map((fee) => <button key={fee} onClick={() => setNewFeeBps(fee)} className={`py-3 rounded-xl text-sm font-medium transition ${newFeeBps === fee ? 'bg-[#238636] text-white' : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'}`}>{fmtFee(fee)}%</button>)}</div></div>
-                  <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { alert('Pool created!'); setNewTokenB(''); setActivePoolTab('add'); await onRefresh() } else if (result.code !== 4001 && result.code !== 4000) { alert(`Failed: ${result.message}`) } } catch (e) { console.error(e) } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
+                  <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { toast.success('Pool Created', `${formatDenom(newTokenA)}/${formatDenom(newTokenB)} pool ready for liquidity`); setNewTokenB(''); setActivePoolTab('add'); await onRefresh() } else if (result.code !== 4001 && result.code !== 4000) { toast.error('Create Pool Failed', result.message) } } catch (e) { console.error(e); toast.error('Create Pool Failed', 'Transaction failed') } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
                     {actionLoading ? 'Creating...' : !walletAddress ? 'Connect Wallet' : 'Create Pool'}
                   </button>
                   <div className="mt-6 p-4 bg-[#0d1117] rounded-xl border border-dashed border-[#30363d]">
@@ -985,7 +1187,7 @@ export default function Home() {
                       <input type="text" value={mintTokenName} onChange={(e) => setMintTokenName(e.target.value.toLowerCase())} placeholder="token name" className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm placeholder-[#484f58]" />
                       <input type="text" value={mintAmount} onChange={(e) => setMintAmount(e.target.value)} placeholder="amount" className="w-28 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm" />
                     </div>
-                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { alert(`Minted! Token: /gno.land/r/dev/gnomo:${mintTokenName}`); setMintTokenName(''); await onRefresh() } else if (result.code !== 4001 && result.code !== 4000) { alert(`Failed: ${result.message}`) } } catch (e) { console.error(e) } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
+                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.success('Tokens Minted', `Denom: /gno.land/r/dev/gnomo:${mintTokenName}`); setMintTokenName(''); await onRefresh() } else if (result.code !== 4001 && result.code !== 4000) { toast.error('Mint Failed', result.message) } } catch (e) { console.error(e); toast.error('Mint Failed', 'Transaction failed') } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
                   </div>
                 </div>
               )}
@@ -1004,9 +1206,19 @@ export default function Home() {
 
               {clmmTab === 'pools' && (
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">CLMM Pools (Concentrated Liquidity)</h3>
-                  {clmmPools.length === 0 ? <div className="text-center py-8 text-[#8b949e]">No CLMM pools yet. Create one!</div> : clmmPools.map((pool) => (
-                    <div key={pool.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d]">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-semibold">CLMM Pools</h3>
+                    <HelpTooltip content={CLMM_TOOLTIPS.concentratedLiquidity} position="right" />
+                  </div>
+                  {loading ? (
+                    <>
+                      <PoolCardSkeleton />
+                      <PoolCardSkeleton />
+                    </>
+                  ) : clmmPools.length === 0 ? (
+                    <NoPoolsEmpty onCreate={() => setClmmTab('create')} />
+                  ) : clmmPools.map((pool) => (
+                    <div key={pool.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d] card-hover">
                       <div className="flex items-center justify-between mb-3">
                         <div className="flex items-center gap-2">
                           <div className="flex -space-x-2"><TokenIcon token={formatCLMMDenom(pool.denomA)} /><TokenIcon token={formatCLMMDenom(pool.denomB)} /></div>
@@ -1017,8 +1229,14 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{formatPriceX6(pool.priceX6)}</p></div>
                         <div><p className="text-[#8b949e]">Current Tick</p><p className="font-medium">{pool.currentTick}</p></div>
-                        <div><p className="text-[#8b949e]">Active Liquidity</p><p className="font-medium">{pool.liquidity.toString()}</p></div>
+                        <div><p className="text-[#8b949e]">Active Liquidity</p><p className="font-medium">{fmtAmt(pool.liquidity, 2)}</p></div>
                         <div><p className="text-[#8b949e]">Tick Spacing</p><p className="font-medium">{pool.tickSpacing}</p></div>
+                      </div>
+                      <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-[#8b949e]">TVL</span>
+                          <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 1_000_000 * 2).toFixed(2)}</span>
+                        </div>
                       </div>
                       <button onClick={() => { setSelectedClmmPool(pool); setClmmTab('mint') }} className="w-full mt-3 py-2 rounded-lg text-sm font-medium bg-[#238636] hover:bg-[#2ea043] text-white transition">Add Position</button>
                     </div>
@@ -1028,8 +1246,20 @@ export default function Home() {
 
               {clmmTab === 'positions' && (
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold">Your CLMM Positions</h3>
-                  {!walletAddress ? <div className="text-center py-8 text-[#8b949e]">Connect wallet to view positions</div> : clmmPositions.length === 0 ? <div className="text-center py-8 text-[#8b949e]">No positions yet</div> : clmmPositions.map((pos) => {
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-lg font-semibold">Your Positions</h3>
+                    <HelpTooltip content={CLMM_TOOLTIPS.priceRange} />
+                  </div>
+                  {!walletAddress ? (
+                    <WalletNotConnectedEmpty onConnect={connectWallet} />
+                  ) : clmmLoading && clmmPositions.length === 0 ? (
+                    <>
+                      <PositionCardSkeleton />
+                      <PositionCardSkeleton />
+                    </>
+                  ) : clmmPositions.length === 0 ? (
+                    <NoPositionsEmpty onAdd={() => setClmmTab('mint')} />
+                  ) : clmmPositions.map((pos) => {
                     const pool = clmmPools.find(p => p.id === pos.poolId)
                     if (!pool) return null
                     const inRange = pool.currentTick >= pos.tickLower && pool.currentTick < pos.tickUpper
@@ -1051,14 +1281,17 @@ export default function Home() {
                       amountB = liq * (pC - pL)
                     }
                     return (
-                      <div key={pos.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d]">
+                      <div key={pos.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d] card-hover">
                         <div className="flex items-center justify-between mb-3">
                           <div className="flex items-center gap-2">
                             <div className="flex -space-x-2"><TokenIcon token={formatCLMMDenom(pool.denomA)} /><TokenIcon token={formatCLMMDenom(pool.denomB)} /></div>
                             <span className="font-semibold">{formatCLMMDenom(pool.denomA)}/{formatCLMMDenom(pool.denomB)}</span>
                             <span className="text-xs bg-[#21262d] px-2 py-1 rounded-full text-[#8b949e]">{(pool.feeBPS / 100).toFixed(2)}% fee</span>
+                            <HelpTooltip content={CLMM_TOOLTIPS.feeTier} position="right" />
                           </div>
-                          <span className={`text-xs px-2 py-1 rounded-full ${inRange ? 'bg-[#238636] text-white' : 'bg-[#f85149] text-white'}`}>{inRange ? 'In Range' : 'Out of Range'}</span>
+                          <Tooltip content={inRange ? CLMM_TOOLTIPS.inRange : CLMM_TOOLTIPS.outOfRange} position="left">
+                            <span className={`text-xs px-2 py-1 rounded-full cursor-help ${inRange ? 'bg-[#238636] text-white' : 'bg-[#f85149] text-white'}`}>{inRange ? 'In Range' : 'Out of Range'}</span>
+                          </Tooltip>
                         </div>
                         <div className="grid grid-cols-2 gap-4 text-sm">
                           <div><p className="text-[#8b949e]">Liquidity</p><p className="font-medium">{pos.liquidity.toString()}</p></div>
@@ -1311,7 +1544,7 @@ export default function Home() {
         )}
 
         <div className="mt-8 grid grid-cols-3 gap-4 max-w-2xl mx-auto">
-          <StatCard title="Total Value Locked" value={totalTVL > 0 ? fmtAmt(BigInt(Math.floor(totalTVL))) : '0'} />
+          <StatCard title="Total Value Locked" value={totalTVL > 0 ? `$${totalTVL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0.00'} />
           <StatCard title="24h Volume" value="--" />
           <StatCard title="Total Pools" value={(pools.length + clmmPools.length).toString()} />
         </div>

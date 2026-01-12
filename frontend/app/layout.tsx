@@ -1,5 +1,6 @@
 import type { Metadata } from 'next'
 import './globals.css'
+import { Providers } from '@/components/Providers'
 
 export const metadata: Metadata = {
   title: 'Gnomo DEX',
@@ -14,7 +15,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="bg-[#0d1117] text-white min-h-screen">
-        {children}
+        <Providers>
+          {children}
+        </Providers>
       </body>
     </html>
   )
