@@ -43,8 +43,18 @@ import {
   NoPoolsEmpty,
   NoPositionsEmpty,
   WalletNotConnectedEmpty,
+  PriceChart,
+  Sparkline,
+  PriceChange,
 } from '@/components'
 import { parseContractError, isUserRejection } from '@/lib/errors'
+import {
+  recordPrice,
+  getPriceHistory,
+  getPriceStats,
+  formatPairName,
+  PricePoint,
+} from '@/lib/priceHistory'
 
 type BestQuoteResult = {
   pool: PoolInfo | null
@@ -144,6 +154,33 @@ export default function Home() {
   const [mintAmountB, setMintAmountB] = useState('')
   const [mintPriceLower, setMintPriceLower] = useState('0.5')
   const [mintPriceUpper, setMintPriceUpper] = useState('2.0')
+
+  // Price chart state
+  const [selectedChartPair, setSelectedChartPair] = useState<string | null>(null)
+  const [priceHistoryData, setPriceHistoryData] = useState<Map<string, PricePoint[]>>(new Map())
+
+  // Load price history on mount and when pools change
+  useEffect(() => {
+    const allPairs = [
+      ...pools.map(p => formatPairName(p.denomA, p.denomB)),
+      ...clmmPools.map(p => formatPairName(p.denomA, p.denomB)),
+    ]
+    const uniquePairs = [...new Set(allPairs)]
+
+    const historyMap = new Map<string, PricePoint[]>()
+    for (const pair of uniquePairs) {
+      const history = getPriceHistory(pair)
+      if (history.length > 0) {
+        historyMap.set(pair, history)
+      }
+    }
+    setPriceHistoryData(historyMap)
+
+    // Auto-select first pair with history
+    if (!selectedChartPair && historyMap.size > 0) {
+      setSelectedChartPair([...historyMap.keys()][0])
+    }
+  }, [pools, clmmPools, selectedChartPair])
 
   const availableTokens = useCallback(() => {
     const tokens = new Set<string>()
@@ -498,6 +535,22 @@ export default function Home() {
       setPools(poolData)
       const clmmData = await getAllCLMMPools()
       setClmmPools(clmmData)
+
+      // Record prices for charts
+      for (const pool of poolData) {
+        if (pool.reserveA > 0n && pool.reserveB > 0n) {
+          const price = Number(pool.reserveB) / Number(pool.reserveA)
+          const pairName = formatPairName(pool.denomA, pool.denomB)
+          recordPrice(pairName, price)
+        }
+      }
+      for (const pool of clmmData) {
+        if (pool.priceX6 > 0n) {
+          const price = Number(pool.priceX6) / 1_000_000
+          const pairName = formatPairName(pool.denomA, pool.denomB)
+          recordPrice(pairName, price)
+        }
+      }
       if (walletAddress) {
         const b = await getBalances()
         setBalances(b)
@@ -1623,6 +1676,66 @@ export default function Home() {
                     </>
                   )}
                   <button onClick={handleMintPosition} disabled={!walletAddress || !selectedClmmPool || !mintAmountA || !mintAmountB || clmmLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && selectedClmmPool && mintAmountA && mintAmountB && !clmmLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>{clmmLoading ? 'Creating Position...' : 'Create Position'}</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Price Chart Section */}
+        {priceHistoryData.size > 0 && (
+          <div className="mt-8 max-w-2xl mx-auto">
+            <div className="bg-[#161b22] rounded-2xl border border-[#30363d] p-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold">Price Chart</h3>
+                <select
+                  value={selectedChartPair || ''}
+                  onChange={(e) => setSelectedChartPair(e.target.value)}
+                  className="bg-[#0d1117] border border-[#30363d] rounded-lg px-3 py-1.5 text-sm text-white"
+                >
+                  {[...priceHistoryData.keys()].map((pair) => (
+                    <option key={pair} value={pair}>{pair}</option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedChartPair && priceHistoryData.get(selectedChartPair) && (
+                <>
+                  {/* Price Stats */}
+                  {(() => {
+                    const stats = getPriceStats(selectedChartPair)
+                    if (!stats) return null
+                    return (
+                      <div className="flex items-baseline gap-4 mb-4">
+                        <span className="text-2xl font-bold">{stats.current.toFixed(stats.current >= 1 ? 4 : 6)}</span>
+                        <PriceChange changePercent={stats.changePercent24h} className="text-sm" />
+                        <span className="text-xs text-[#8b949e]">
+                          24h: {stats.low24h.toFixed(4)} - {stats.high24h.toFixed(4)}
+                        </span>
+                      </div>
+                    )
+                  })()}
+
+                  {/* Chart */}
+                  <div className="w-full">
+                    <PriceChart
+                      data={priceHistoryData.get(selectedChartPair) || []}
+                      width={600}
+                      height={150}
+                      showAxes={true}
+                      className="w-full"
+                    />
+                  </div>
+
+                  <p className="text-xs text-[#8b949e] mt-3 text-center">
+                    Price history tracked locally in your browser
+                  </p>
+                </>
+              )}
+
+              {(!selectedChartPair || !priceHistoryData.get(selectedChartPair)) && (
+                <div className="text-center text-[#8b949e] py-8">
+                  <p>Price data will appear as you use the DEX</p>
                 </div>
               )}
             </div>
