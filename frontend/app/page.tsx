@@ -1235,7 +1235,8 @@ export default function Home() {
                 }
 
                 // Check for insufficient liquidity - output is 0 or price impact > 50%
-                const insufficientLiquidity = bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
+                // Only check when quote is fresh (not loading)
+                const insufficientLiquidity = !quoteLoading && bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
                   bestQuote.amountOut === 0n || priceImpactCheck > 50
                 )
                 const canSwap = walletAddress && bestQuote && !swapLoading && !insufficientBalance && !insufficientLiquidity
