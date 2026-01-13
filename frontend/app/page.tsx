@@ -475,7 +475,10 @@ export default function Home() {
         setFromAmount('')
         setToAmount('')
         setBestQuote(null)
+        // Quick refresh for balance update
+        await new Promise(r => setTimeout(r, 1500))
         await onRefresh()
+        setTimeout(() => onRefresh(), 2500)
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
       } else {
@@ -674,7 +677,9 @@ export default function Home() {
         toast.update(loadingToast, 'success', 'Liquidity Added', `Added ${amountA} ${formatDenom(selectedPool.denomA)} and ${amountB} ${formatDenom(selectedPool.denomB)}`)
         setAmountA('')
         setAmountB('')
+        await new Promise(r => setTimeout(r, 1500))
         await onRefresh()
+        setTimeout(() => onRefresh(), 2500)
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
       } else {
@@ -707,7 +712,9 @@ export default function Home() {
         toast.update(loadingToast, 'success', 'Liquidity Removed', 'Your tokens have been returned to your wallet')
         setLpAmount('')
         setSelectedPercent(null)
+        await new Promise(r => setTimeout(r, 1500))
         await onRefresh()
+        setTimeout(() => onRefresh(), 2500)
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
       } else {
@@ -787,7 +794,9 @@ export default function Home() {
         setMintAmountA('')
         setMintAmountB('')
         setClmmTab('positions')
+        await new Promise(r => setTimeout(r, 1500))
         await onRefresh()
+        setTimeout(() => onRefresh(), 2500)
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
       } else {
@@ -816,7 +825,9 @@ export default function Home() {
       })
       if (result.code === 0) {
         toast.update(loadingToast, 'success', 'Position Closed', 'Liquidity returned to your wallet')
+        await new Promise(r => setTimeout(r, 1500))
         await onRefresh()
+        setTimeout(() => onRefresh(), 2500)
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
       } else {
@@ -845,7 +856,9 @@ export default function Home() {
       })
       if (result.code === 0) {
         toast.update(loadingToast, 'success', 'Fees Collected', 'Trading fees sent to your wallet')
+        await new Promise(r => setTimeout(r, 1500))
         await onRefresh()
+        setTimeout(() => onRefresh(), 2500)
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
       } else {
@@ -1198,14 +1211,19 @@ export default function Home() {
               {(() => {
                 const insufficientBalance = fromToken && fromAmount && parseFloat(fromAmount) > 0 &&
                   parseFloat(fromAmount) * 1_000_000 > Number(getBalance(fromToken))
-                const canSwap = walletAddress && bestQuote && !swapLoading && !insufficientBalance
+                // Check for insufficient liquidity - output is 0 or less than 10% of input (severe slippage)
+                const insufficientLiquidity = bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
+                  bestQuote.amountOut === 0n ||
+                  Number(bestQuote.amountOut) < (parseFloat(fromAmount) * 1_000_000 * 0.1)
+                )
+                const canSwap = walletAddress && bestQuote && !swapLoading && !insufficientBalance && !insufficientLiquidity
                 return (
                   <button
                     onClick={handleSwap}
                     disabled={!canSwap}
-                    className={`w-full mt-4 py-4 rounded-xl font-semibold text-lg transition ${canSwap ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : insufficientBalance ? 'bg-[#f8514926] text-[#f85149] border border-[#f85149] cursor-not-allowed' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}
+                    className={`w-full mt-4 py-4 rounded-xl font-semibold text-lg transition ${canSwap ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : (insufficientBalance || insufficientLiquidity) ? 'bg-[#f8514926] text-[#f85149] border border-[#f85149] cursor-not-allowed' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}
                   >
-                    {swapLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Swapping...</span> : insufficientBalance ? 'Insufficient Balance' : !walletAddress ? 'Connect Wallet' : !fromToken || !toToken ? 'Select Tokens' : !fromAmount ? 'Enter Amount' : !bestQuote && !quoteLoading ? 'No Pool Available' : !bestQuote ? 'Finding Best Rate...' : 'Swap'}
+                    {swapLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Swapping...</span> : insufficientBalance ? 'Insufficient Balance' : insufficientLiquidity ? 'Insufficient Liquidity' : !walletAddress ? 'Connect Wallet' : !fromToken || !toToken ? 'Select Tokens' : !fromAmount ? 'Enter Amount' : !bestQuote && !quoteLoading ? 'No Pool Available' : !bestQuote ? 'Finding Best Rate...' : 'Swap'}
                   </button>
                 )
               })()}
@@ -1375,7 +1393,7 @@ export default function Home() {
                       <input type="text" value={mintTokenName} onChange={(e) => setMintTokenName(e.target.value.toLowerCase())} placeholder="token name" className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm placeholder-[#484f58]" />
                       <input type="text" value={mintAmount} onChange={(e) => setMintAmount(e.target.value)} placeholder="amount" className="w-28 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm" />
                     </div>
-                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); const loadingToast = toast.loading('Minting Tokens', 'Please confirm in your wallet...'); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Tokens Minted', `Denom: /${PKG_PATH}:${mintTokenName}`); setMintTokenName(''); await new Promise(r => setTimeout(r, 1000)); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
+                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); const loadingToast = toast.loading('Minting Tokens', 'Please confirm in your wallet...'); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Tokens Minted', `Denom: /${PKG_PATH}:${mintTokenName}`); setMintTokenName(''); await new Promise(r => setTimeout(r, 1500)); await onRefresh(); setTimeout(() => onRefresh(), 2500) } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
                     {walletAddress && balances.size > 0 && (
                       <div className="mt-3 pt-3 border-t border-[#30363d]">
                         <p className="text-xs text-[#8b949e] mb-2">Your Wallet Balances (click to copy denom):</p>
