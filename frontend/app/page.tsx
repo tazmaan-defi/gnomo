@@ -1068,8 +1068,8 @@ export default function Home() {
               </div>
 
               {bestQuote && fromAmount && toAmount && (() => {
-                const inputAmt = parseFloat(fromAmount)
-                const outputAmt = parseFloat(toAmount)
+                const inputAmt = parseFloat(fromAmount.replace(/,/g, ''))
+                const outputAmt = parseFloat(toAmount.replace(/,/g, ''))
                 if (inputAmt <= 0 || outputAmt <= 0) return null
 
                 // Get fee info
