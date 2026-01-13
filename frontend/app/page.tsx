@@ -1211,10 +1211,32 @@ export default function Home() {
               {(() => {
                 const insufficientBalance = fromToken && fromAmount && parseFloat(fromAmount) > 0 &&
                   parseFloat(fromAmount) * 1_000_000 > Number(getBalance(fromToken))
-                // Check for insufficient liquidity - output is 0 or less than 10% of input (severe slippage)
+
+                // Calculate price impact for liquidity check
+                let priceImpactCheck = 0
+                if (bestQuote && fromAmount && parseFloat(fromAmount) > 0) {
+                  const inputAmt = parseFloat(fromAmount) * 1_000_000
+                  if (bestQuote.poolType === 'v2' && bestQuote.pool) {
+                    const reserveIn = bestQuote.tokenIn === 'A'
+                      ? Number(bestQuote.pool.reserveA)
+                      : Number(bestQuote.pool.reserveB)
+                    if (reserveIn > 0) {
+                      priceImpactCheck = (inputAmt / (2 * reserveIn)) * 100
+                    }
+                  } else if (bestQuote.poolType === 'clmm' && bestQuote.clmmPool) {
+                    const spotPrice = Number(bestQuote.clmmPool.priceX6) / 1_000_000
+                    const outputAmt = Number(bestQuote.amountOut)
+                    if (inputAmt > 0 && spotPrice > 0) {
+                      const execPrice = outputAmt / inputAmt
+                      const expectedPrice = bestQuote.tokenIn === 'A' ? spotPrice : 1 / spotPrice
+                      priceImpactCheck = Math.abs((expectedPrice - execPrice) / expectedPrice) * 100
+                    }
+                  }
+                }
+
+                // Check for insufficient liquidity - output is 0 or price impact > 50%
                 const insufficientLiquidity = bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
-                  bestQuote.amountOut === 0n ||
-                  Number(bestQuote.amountOut) < (parseFloat(fromAmount) * 1_000_000 * 0.1)
+                  bestQuote.amountOut === 0n || priceImpactCheck > 50
                 )
                 const canSwap = walletAddress && bestQuote && !swapLoading && !insufficientBalance && !insufficientLiquidity
                 return (
