@@ -18,6 +18,7 @@ import {
   burnCLMMPosition,
   swapCLMM,
   collectCLMMFees,
+  PKG_PATH,
 } from '@/lib/adena'
 import {
   getAllCLMMPools,
@@ -731,6 +732,8 @@ export default function Home() {
         setNewClmmTokenB('')
         setNewClmmInitialPrice('1')
         setClmmTab('pools')
+        // Small delay to allow chain to commit before refresh
+        await new Promise(r => setTimeout(r, 1000))
         await onRefresh()
       } else if (result.code === 4001 || result.code === 4000) {
         toast.dismiss(loadingToast)
@@ -1259,6 +1262,15 @@ export default function Home() {
                 </div>
               )}
 
+              {activePoolTab === 'add' && !selectedPool && (
+                <div className="text-center py-8">
+                  <p className="text-[#8b949e] mb-4">No V2 pools exist yet</p>
+                  <button onClick={() => setActivePoolTab('create')} className="px-6 py-3 bg-[#238636] hover:bg-[#2ea043] text-white rounded-xl font-medium transition">
+                    Create First Pool
+                  </button>
+                </div>
+              )}
+
               {activePoolTab === 'add' && selectedPool && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">Add Liquidity</h3>
@@ -1280,6 +1292,15 @@ export default function Home() {
                   </div>
                   <button onClick={handleAddLiquidity} disabled={!walletAddress || !amountA || !amountB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && amountA && amountB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
                     {actionLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Adding...</span> : !walletAddress ? 'Connect Wallet' : 'Add Liquidity'}
+                  </button>
+                </div>
+              )}
+
+              {activePoolTab === 'remove' && !selectedPool && (
+                <div className="text-center py-8">
+                  <p className="text-[#8b949e] mb-4">No V2 pools exist yet</p>
+                  <button onClick={() => setActivePoolTab('create')} className="px-6 py-3 bg-[#238636] hover:bg-[#2ea043] text-white rounded-xl font-medium transition">
+                    Create First Pool
                   </button>
                 </div>
               )}
@@ -1315,9 +1336,9 @@ export default function Home() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">Create New Pool</h3>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label><input type="text" value={newTokenA} onChange={(e) => setNewTokenA(e.target.value)} placeholder="ugnot" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
-                  <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newTokenB} onChange={(e) => setNewTokenB(e.target.value)} placeholder="/gno.land/r/dev/gnomo:usdc" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
+                  <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newTokenB} onChange={(e) => setNewTokenB(e.target.value)} placeholder={`/${PKG_PATH}:usdc`} className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label><div className="grid grid-cols-3 gap-2">{[5, 10, 30, 50, 100, 200].map((fee) => <button key={fee} onClick={() => setNewFeeBps(fee)} className={`py-3 rounded-xl text-sm font-medium transition ${newFeeBps === fee ? 'bg-[#238636] text-white' : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'}`}>{fmtFee(fee)}%</button>)}</div></div>
-                  <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); const loadingToast = toast.loading('Creating Pool', 'Please confirm in your wallet...'); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Pool Created', `${formatDenom(newTokenA)}/${formatDenom(newTokenB)} pool ready for liquidity`); setNewTokenB(''); setActivePoolTab('add'); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
+                  <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); const loadingToast = toast.loading('Creating Pool', 'Please confirm in your wallet...'); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Pool Created', `${formatDenom(newTokenA)}/${formatDenom(newTokenB)} pool ready for liquidity`); setNewTokenB(''); setActivePoolTab('add'); await new Promise(r => setTimeout(r, 1000)); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
                     {actionLoading ? 'Creating...' : !walletAddress ? 'Connect Wallet' : 'Create Pool'}
                   </button>
                   <div className="mt-6 p-4 bg-[#0d1117] rounded-xl border border-dashed border-[#30363d]">
@@ -1326,7 +1347,20 @@ export default function Home() {
                       <input type="text" value={mintTokenName} onChange={(e) => setMintTokenName(e.target.value.toLowerCase())} placeholder="token name" className="flex-1 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm placeholder-[#484f58]" />
                       <input type="text" value={mintAmount} onChange={(e) => setMintAmount(e.target.value)} placeholder="amount" className="w-28 bg-[#161b22] border border-[#30363d] rounded-lg px-3 py-2 text-white text-sm" />
                     </div>
-                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); const loadingToast = toast.loading('Minting Tokens', 'Please confirm in your wallet...'); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Tokens Minted', `Denom: /gno.land/r/dev/gnomo:${mintTokenName}`); setMintTokenName(''); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
+                    <button onClick={async () => { if (!walletAddress || !mintTokenName) return; setActionLoading(true); const loadingToast = toast.loading('Minting Tokens', 'Please confirm in your wallet...'); try { const result = await adenaMintTokens({ caller: walletAddress, baseName: mintTokenName, amount: BigInt(mintAmount) }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Tokens Minted', `Denom: /${PKG_PATH}:${mintTokenName}`); setMintTokenName(''); await new Promise(r => setTimeout(r, 1000)); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Mint Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !mintTokenName || actionLoading} className="w-full py-2 rounded-lg text-sm font-medium bg-[#f0883e] hover:bg-[#d97706] text-white disabled:bg-[#21262d] disabled:text-[#8b949e] disabled:cursor-not-allowed transition">Mint Tokens</button>
+                    {walletAddress && balances.size > 0 && (
+                      <div className="mt-3 pt-3 border-t border-[#30363d]">
+                        <p className="text-xs text-[#8b949e] mb-2">Your Wallet Balances (click to copy denom):</p>
+                        <div className="space-y-1 max-h-32 overflow-y-auto">
+                          {Array.from(balances.entries()).map(([denom, amount]) => (
+                            <div key={denom} className="flex justify-between text-xs hover:bg-[#21262d] px-1 py-0.5 rounded cursor-pointer" onClick={() => { navigator.clipboard.writeText(denom); toast.success('Copied', `Denom: ${denom}`) }}>
+                              <span className="text-[#8b949e] truncate max-w-[200px]" title={denom}>{denom}</span>
+                              <span className="text-white">{fmtAmt(amount)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -1527,7 +1561,7 @@ export default function Home() {
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">Create CLMM Pool</h3>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label><input type="text" value={newClmmTokenA} onChange={(e) => setNewClmmTokenA(e.target.value)} placeholder="ugnot" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
-                  <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newClmmTokenB} onChange={(e) => setNewClmmTokenB(e.target.value)} placeholder="/gno.land/r/dev/gnomo:usdc" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
+                  <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newClmmTokenB} onChange={(e) => setNewClmmTokenB(e.target.value)} placeholder={`/${PKG_PATH}:usdc`} className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label><div className="grid grid-cols-3 gap-2">{[5, 30, 100].map((fee) => <button key={fee} onClick={() => setNewClmmFee(fee)} className={`py-3 rounded-xl text-sm font-medium transition ${newClmmFee === fee ? 'bg-[#238636] text-white' : 'bg-[#0d1117] text-[#8b949e] hover:text-white border border-[#30363d]'}`}>{(fee / 100).toFixed(2)}%</button>)}</div></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Initial Price (B per A)</label><input type="text" value={newClmmInitialPrice} onChange={(e) => setNewClmmInitialPrice(e.target.value)} placeholder="1.0" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
                   <button onClick={handleCreateClmmPool} disabled={!walletAddress || !newClmmTokenB || clmmLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newClmmTokenB && !clmmLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>{clmmLoading ? 'Creating...' : 'Create CLMM Pool'}</button>

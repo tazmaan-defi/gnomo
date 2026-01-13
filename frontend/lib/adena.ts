@@ -204,7 +204,7 @@ export async function executeContract(params: {
 
 // ==================== DEX-specific functions ====================
 
-const PKG_PATH = process.env.NEXT_PUBLIC_GNOMO_PKG_PATH || 'gno.land/r/dev/gnomo';
+export const PKG_PATH = process.env.NEXT_PUBLIC_GNOMO_PKG_PATH || 'gno.land/r/dev/gnomo';
 
 // Swap tokens
 export async function swap(params: {
