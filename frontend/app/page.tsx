@@ -509,6 +509,17 @@ export default function Home() {
   const selectedPool = pools.find(p => p.id === selectedPoolId) || pools[0]
   const userLpBalance = lpBalances.get(selectedPoolId) || 0n
 
+  // Auto-select first token when balances load
+  useEffect(() => {
+    if (balances.size > 0) {
+      const tokens = Array.from(balances.keys())
+      // Prefer ugnot as Token A if available
+      const defaultA = tokens.find(t => t === 'ugnot') || tokens[0]
+      if (!tokens.includes(newTokenA)) setNewTokenA(defaultA)
+      if (!tokens.includes(newClmmTokenA)) setNewClmmTokenA(defaultA)
+    }
+  }, [balances])
+
   const connectWallet = async () => {
     if (!adenaAvailable) {
       window.open('https://adena.app', '_blank')
@@ -1335,8 +1346,23 @@ export default function Home() {
               {activePoolTab === 'create' && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">Create New Pool</h3>
-                  <div><label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label><input type="text" value={newTokenA} onChange={(e) => setNewTokenA(e.target.value)} placeholder="ugnot" className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
-                  <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newTokenB} onChange={(e) => setNewTokenB(e.target.value)} placeholder={`/${PKG_PATH}:usdc`} className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white placeholder-[#484f58]" /></div>
+                  <div>
+                    <label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label>
+                    <select value={newTokenA} onChange={(e) => setNewTokenA(e.target.value)} className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white">
+                      {Array.from(balances.entries()).map(([denom, amount]) => (
+                        <option key={denom} value={denom}>{formatDenom(denom)} ({fmtAmt(amount)})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label>
+                    <select value={newTokenB} onChange={(e) => setNewTokenB(e.target.value)} className="w-full bg-[#161b22] border border-[#30363d] rounded-xl px-3 py-3 text-white">
+                      <option value="">Select token...</option>
+                      {Array.from(balances.entries()).filter(([denom]) => denom !== newTokenA).map(([denom, amount]) => (
+                        <option key={denom} value={denom}>{formatDenom(denom)} ({fmtAmt(amount)})</option>
+                      ))}
+                    </select>
+                  </div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label><div className="grid grid-cols-3 gap-2">{[5, 10, 30, 50, 100, 200].map((fee) => <button key={fee} onClick={() => setNewFeeBps(fee)} className={`py-3 rounded-xl text-sm font-medium transition ${newFeeBps === fee ? 'bg-[#238636] text-white' : 'bg-[#161b22] text-[#8b949e] hover:text-white border border-[#30363d]'}`}>{fmtFee(fee)}%</button>)}</div></div>
                   <button onClick={async () => { if (!walletAddress || !newTokenB) return; setActionLoading(true); const loadingToast = toast.loading('Creating Pool', 'Please confirm in your wallet...'); try { const result = await adenaCreatePool({ caller: walletAddress, denomA: newTokenA, denomB: newTokenB, feeBps: newFeeBps }); if (result.code === 0) { toast.update(loadingToast, 'success', 'Pool Created', `${formatDenom(newTokenA)}/${formatDenom(newTokenB)} pool ready for liquidity`); setNewTokenB(''); setActivePoolTab('add'); await new Promise(r => setTimeout(r, 1000)); await onRefresh() } else if (result.code === 4001 || result.code === 4000) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(result)) } } catch (e) { console.error(e); if (isUserRejection(e)) { toast.dismiss(loadingToast) } else { toast.update(loadingToast, 'error', 'Create Pool Failed', parseContractError(e)) } } finally { setActionLoading(false) } }} disabled={!walletAddress || !newTokenB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newTokenB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
                     {actionLoading ? 'Creating...' : !walletAddress ? 'Connect Wallet' : 'Create Pool'}
@@ -1560,8 +1586,23 @@ export default function Home() {
               {clmmTab === 'create' && (
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold">Create CLMM Pool</h3>
-                  <div><label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label><input type="text" value={newClmmTokenA} onChange={(e) => setNewClmmTokenA(e.target.value)} placeholder="ugnot" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
-                  <div><label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label><input type="text" value={newClmmTokenB} onChange={(e) => setNewClmmTokenB(e.target.value)} placeholder={`/${PKG_PATH}:usdc`} className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
+                  <div>
+                    <label className="text-sm text-[#8b949e] block mb-2">Token A (Base)</label>
+                    <select value={newClmmTokenA} onChange={(e) => setNewClmmTokenA(e.target.value)} className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white">
+                      {Array.from(balances.entries()).map(([denom, amount]) => (
+                        <option key={denom} value={denom}>{formatDenom(denom)} ({fmtAmt(amount)})</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-sm text-[#8b949e] block mb-2">Token B (Quote)</label>
+                    <select value={newClmmTokenB} onChange={(e) => setNewClmmTokenB(e.target.value)} className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white">
+                      <option value="">Select token...</option>
+                      {Array.from(balances.entries()).filter(([denom]) => denom !== newClmmTokenA).map(([denom, amount]) => (
+                        <option key={denom} value={denom}>{formatDenom(denom)} ({fmtAmt(amount)})</option>
+                      ))}
+                    </select>
+                  </div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Fee Tier</label><div className="grid grid-cols-3 gap-2">{[5, 30, 100].map((fee) => <button key={fee} onClick={() => setNewClmmFee(fee)} className={`py-3 rounded-xl text-sm font-medium transition ${newClmmFee === fee ? 'bg-[#238636] text-white' : 'bg-[#0d1117] text-[#8b949e] hover:text-white border border-[#30363d]'}`}>{(fee / 100).toFixed(2)}%</button>)}</div></div>
                   <div><label className="text-sm text-[#8b949e] block mb-2">Initial Price (B per A)</label><input type="text" value={newClmmInitialPrice} onChange={(e) => setNewClmmInitialPrice(e.target.value)} placeholder="1.0" className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white" /></div>
                   <button onClick={handleCreateClmmPool} disabled={!walletAddress || !newClmmTokenB || clmmLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && newClmmTokenB && !clmmLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>{clmmLoading ? 'Creating...' : 'Create CLMM Pool'}</button>
