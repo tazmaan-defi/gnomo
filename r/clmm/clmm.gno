@@ -183,50 +183,99 @@ func getTickAtPrice(priceX6 int64) int64 {
 }
 
 // =============================================================================
-// LIQUIDITY MATH
+// LIQUIDITY MATH (using sqrt-based Uniswap v3 formulas)
 // =============================================================================
 
+// getAmountsForLiquidity calculates token amounts for a given liquidity
+// Uses proper sqrt-based CLMM math:
+// - amt0 = L * (1/sqrt(pC) - 1/sqrt(pU)) = L * (sqrt(pU) - sqrt(pC)) / (sqrt(pC) * sqrt(pU))
+// - amt1 = L * (sqrt(pC) - sqrt(pL))
 func getAmountsForLiquidity(pL, pU, pC, liq int64) (int64, int64) {
+	if liq <= 0 {
+		return 0, 0
+	}
+
+	sqrtPrecision := int64(1000) // sqrt(PRECISION)
+	sqrtPL := isqrt(pL * PRECISION)
+	sqrtPU := isqrt(pU * PRECISION)
+	sqrtPC := isqrt(pC * PRECISION)
+
 	if pC <= pL {
 		// Price below range: all token0
-		denominator := safeMulDiv(pL, pU, PRECISION)
-		if denominator == 0 {
+		// amt0 = L * (sqrt(pU) - sqrt(pL)) / (sqrt(pL) * sqrt(pU) / sqrtPrecision)
+		if sqrtPL == 0 || sqrtPU == 0 {
 			return 0, 0
 		}
-		amt0 := safeMulDiv(liq, pU-pL, denominator)
+		denom := safeMulDiv(sqrtPL, sqrtPU, sqrtPrecision*PRECISION)
+		if denom == 0 {
+			return 0, 0
+		}
+		amt0 := safeMulDiv(liq, sqrtPU-sqrtPL, denom)
 		return amt0, 0
 	} else if pC >= pU {
 		// Price above range: all token1
-		amt1 := safeMulDiv(liq, pU-pL, PRECISION)
+		// amt1 = L * (sqrt(pU) - sqrt(pL)) / sqrtPrecision
+		amt1 := safeMulDiv(liq, sqrtPU-sqrtPL, sqrtPrecision*PRECISION)
 		return 0, amt1
 	} else {
 		// Price in range: mix of both tokens
-		denominator := safeMulDiv(pC, pU, PRECISION)
-		if denominator == 0 {
+		// amt0 = L * (sqrt(pU) - sqrt(pC)) / (sqrt(pC) * sqrt(pU) / sqrtPrecision)
+		// amt1 = L * (sqrt(pC) - sqrt(pL)) / sqrtPrecision
+		denom0 := safeMulDiv(sqrtPC, sqrtPU, sqrtPrecision*PRECISION)
+		if denom0 == 0 {
 			return 0, 0
 		}
-		amt0 := safeMulDiv(liq, pU-pC, denominator)
-		amt1 := safeMulDiv(liq, pC-pL, PRECISION)
+		amt0 := safeMulDiv(liq, sqrtPU-sqrtPC, denom0)
+		amt1 := safeMulDiv(liq, sqrtPC-sqrtPL, sqrtPrecision*PRECISION)
 		return amt0, amt1
 	}
 }
 
+// getLiquidityForAmounts calculates liquidity from token amounts
+// Uses proper sqrt-based CLMM math (inverse of getAmountsForLiquidity)
 func getLiquidityForAmounts(pL, pU, pC, amt0, amt1 int64) int64 {
+	sqrtPrecision := int64(1000)
+	sqrtPL := isqrt(pL * PRECISION)
+	sqrtPU := isqrt(pU * PRECISION)
+	sqrtPC := isqrt(pC * PRECISION)
+
 	if pC <= pL {
-		if amt0 <= 0 {
+		// Price below range: use amt0 only
+		// L = amt0 * sqrt(pL) * sqrt(pU) / (sqrt(pU) - sqrt(pL))
+		if amt0 <= 0 || sqrtPU <= sqrtPL {
 			return 0
 		}
-		numerator := safeMulDiv(pL, pU, PRECISION)
-		return safeMulDiv(amt0, numerator, pU-pL)
+		numerator := safeMulDiv(sqrtPL, sqrtPU, sqrtPrecision*PRECISION)
+		return safeMulDiv(amt0, numerator, sqrtPU-sqrtPL)
 	} else if pC >= pU {
-		if amt1 <= 0 {
+		// Price above range: use amt1 only
+		// L = amt1 * sqrtPrecision / (sqrt(pU) - sqrt(pL))
+		if amt1 <= 0 || sqrtPU <= sqrtPL {
 			return 0
 		}
-		return safeMulDiv(amt1, PRECISION, pU-pL)
+		return safeMulDiv(amt1, sqrtPrecision*PRECISION, sqrtPU-sqrtPL)
 	} else {
-		numerator0 := safeMulDiv(pC, pU, PRECISION)
-		liq0 := safeMulDiv(amt0, numerator0, pU-pC)
-		liq1 := safeMulDiv(amt1, PRECISION, pC-pL)
+		// Price in range: use min of liquidity from both tokens
+		// L0 = amt0 * sqrt(pC) * sqrt(pU) / (sqrt(pU) - sqrt(pC))
+		// L1 = amt1 * sqrtPrecision / (sqrt(pC) - sqrt(pL))
+		var liq0, liq1 int64
+
+		if amt0 > 0 && sqrtPU > sqrtPC {
+			numerator0 := safeMulDiv(sqrtPC, sqrtPU, sqrtPrecision*PRECISION)
+			liq0 = safeMulDiv(amt0, numerator0, sqrtPU-sqrtPC)
+		}
+
+		if amt1 > 0 && sqrtPC > sqrtPL {
+			liq1 = safeMulDiv(amt1, sqrtPrecision*PRECISION, sqrtPC-sqrtPL)
+		}
+
+		// Return minimum (or whichever is non-zero)
+		if liq0 == 0 {
+			return liq1
+		}
+		if liq1 == 0 {
+			return liq0
+		}
 		if liq0 < liq1 {
 			return liq0
 		}
