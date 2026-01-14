@@ -56,6 +56,7 @@ import {
   formatPairName,
   PricePoint,
 } from '@/lib/priceHistory'
+import { recordVolume, get24hVolume } from '@/lib/volumeHistory'
 
 type BestQuoteResult = {
   pool: PoolInfo | null
@@ -480,6 +481,23 @@ export default function Home() {
 
       if (result.code === 0) {
         toast.update(loadingToast, 'success', 'Swap Successful', `${fromAmount} ${formatDenom(fromToken)} → ${toAmount} ${formatDenom(toToken)}`)
+
+        // Record volume (estimate USD based on GNOT ≈ $10)
+        const GNOT_PRICE_USD = 10
+        const inputNum = parseFloat(fromAmount.replace(/,/g, ''))
+        const outputNum = parseFloat(toAmount.replace(/,/g, ''))
+        let volumeUSD = 0
+        if (fromToken === 'ugnot') {
+          volumeUSD = inputNum * GNOT_PRICE_USD
+        } else if (toToken === 'ugnot') {
+          volumeUSD = outputNum * GNOT_PRICE_USD
+        } else {
+          // For non-GNOT pairs, use input amount as rough estimate
+          volumeUSD = inputNum
+        }
+        const pair = `${formatDenom(fromToken)}/${formatDenom(toToken)}`
+        recordVolume(pair, volumeUSD)
+
         setFromAmount('')
         setToAmount('')
         setBestQuote(null)
@@ -930,7 +948,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.4.0</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.5.0</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1890,7 +1908,10 @@ export default function Home() {
 
         <div className="mt-8 grid grid-cols-3 gap-4 max-w-2xl mx-auto">
           <StatCard title="Total Value Locked" value={totalTVL > 0 ? `$${totalTVL.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0.00'} />
-          <StatCard title="24h Volume" value="--" />
+          <StatCard title="24h Volume" value={(() => {
+            const vol = get24hVolume()
+            return vol > 0 ? `$${vol.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : '$0.00'
+          })()} />
           <StatCard title="Total Pools" value={(pools.length + clmmPools.length).toString()} />
         </div>
       </main>
