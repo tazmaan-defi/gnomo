@@ -65,13 +65,21 @@ type BestQuoteResult = {
   tokenIn: 'A' | 'B'
 }
 
-// Helper to format token amounts with 6 decimals and commas
-function fmtAmt(amount: bigint, maxDecimals = 6): string {
+// Helper to format token amounts - defaults to 2 decimals for readability
+function fmtAmt(amount: bigint, maxDecimals = 2): string {
   const num = Number(amount) / 1_000_000
   if (num === 0) return '0'
-  if (num < 0.000001) return '<0.000001'
+  if (num < 0.01 && num > 0) return '<0.01'
 
-  // Use Intl for proper comma formatting
+  // For large numbers, use K/M notation to avoid comma confusion
+  if (num >= 1_000_000) {
+    return (num / 1_000_000).toFixed(2) + 'M'
+  }
+  if (num >= 10_000) {
+    return (num / 1_000).toFixed(1) + 'K'
+  }
+
+  // Use Intl for proper comma formatting with limited decimals
   const formatted = new Intl.NumberFormat('en-US', {
     minimumFractionDigits: 0,
     maximumFractionDigits: maxDecimals,
