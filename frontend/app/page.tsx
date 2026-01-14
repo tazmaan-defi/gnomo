@@ -402,10 +402,10 @@ export default function Home() {
         const tokenIn: 'A' | 'B' = isAtoB ? 'A' : 'B'
         try {
           const quote = await getCLMMQuote(clmmPool.id, tokenIn, amountIn)
-          // Sanity check: if quote exceeds 2x pool liquidity, it's likely invalid
+          // Sanity check: if quote exceeds pool liquidity, it's likely invalid
           // (contract may return theoretical values that exceed actual available tokens)
-          const maxReasonableOutput = clmmPool.liquidity * 2n
-          if (quote > 0n && quote <= maxReasonableOutput && (!best || quote > best.amountOut)) {
+          // Liquidity in CLMM approximates max extractable amount of either token
+          if (quote > 0n && quote <= clmmPool.liquidity && (!best || quote > best.amountOut)) {
             best = { pool: null, clmmPool, poolType: 'clmm', amountOut: quote, tokenIn }
           }
         } catch (e) {
@@ -1100,22 +1100,18 @@ export default function Home() {
                     priceImpact = (inputAmt / (2 * reserveIn)) * 100
                   }
                 } else if (bestQuote.poolType === 'clmm' && bestQuote.clmmPool) {
-                  // CLMM: compare execution to expected price after fee
-                  const spotPrice = Number(bestQuote.clmmPool.priceX6) / 1_000_000
+                  // CLMM: compare execution to expected price
+                  // priceX6 = price of token B in terms of token A (how much A per B)
+                  const priceBA = Number(bestQuote.clmmPool.priceX6) / 1_000_000 // A per B
                   const execPrice = outputAmt / inputAmt
+                  const feeMultiplier = 1 - feeBps / 10000
 
-                  if (spotPrice > 0) {
-                    // Expected price AFTER fee (to isolate slippage from fee)
-                    const feeMultiplier = 1 - feeBps / 10000
-
-                    if (bestQuote.tokenIn === 'A') {
-                      const expectedAfterFee = spotPrice * feeMultiplier
-                      priceImpact = Math.max(0, ((expectedAfterFee - execPrice) / expectedAfterFee) * 100)
-                    } else {
-                      const spotPriceInverse = 1 / spotPrice
-                      const expectedAfterFee = spotPriceInverse * feeMultiplier
-                      priceImpact = Math.max(0, ((expectedAfterFee - execPrice) / expectedAfterFee) * 100)
-                    }
+                  if (priceBA > 0) {
+                    // tokenIn='B' means swapping B for A: execPrice = A_out/B_in, expected = priceBA
+                    // tokenIn='A' means swapping A for B: execPrice = B_out/A_in, expected = 1/priceBA
+                    const expectedPrice = bestQuote.tokenIn === 'B' ? priceBA : 1 / priceBA
+                    const expectedAfterFee = expectedPrice * feeMultiplier
+                    priceImpact = Math.max(0, ((expectedAfterFee - execPrice) / expectedAfterFee) * 100)
                   }
                 }
 
@@ -1227,11 +1223,14 @@ export default function Home() {
                       priceImpactCheck = (inputAmt / (2 * reserveIn)) * 100
                     }
                   } else if (bestQuote.poolType === 'clmm' && bestQuote.clmmPool) {
-                    const spotPrice = Number(bestQuote.clmmPool.priceX6) / 1_000_000
+                    // priceX6 = price of token B in terms of token A (how much A per B)
+                    const priceBA = Number(bestQuote.clmmPool.priceX6) / 1_000_000
                     const outputAmt = Number(bestQuote.amountOut)
-                    if (inputAmt > 0 && spotPrice > 0) {
+                    if (inputAmt > 0 && priceBA > 0) {
                       const execPrice = outputAmt / inputAmt
-                      const expectedPrice = bestQuote.tokenIn === 'A' ? spotPrice : 1 / spotPrice
+                      // tokenIn='B': swapping B for A, expected = priceBA
+                      // tokenIn='A': swapping A for B, expected = 1/priceBA
+                      const expectedPrice = bestQuote.tokenIn === 'B' ? priceBA : 1 / priceBA
                       priceImpactCheck = Math.abs((expectedPrice - execPrice) / expectedPrice) * 100
                     }
                   }
@@ -1240,7 +1239,7 @@ export default function Home() {
                 // Check for insufficient liquidity - output is 0, price impact > 50%, or CLMM output exceeds pool capacity
                 // Only check when quote is fresh (not loading)
                 const clmmExceedsLiquidity = bestQuote?.poolType === 'clmm' && bestQuote.clmmPool &&
-                  bestQuote.amountOut > bestQuote.clmmPool.liquidity * 2n
+                  bestQuote.amountOut > bestQuote.clmmPool.liquidity
                 const insufficientLiquidity = !quoteLoading && bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
                   bestQuote.amountOut === 0n || priceImpactCheck > 50 || clmmExceedsLiquidity
                 )
