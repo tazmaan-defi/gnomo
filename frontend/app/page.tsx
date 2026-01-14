@@ -402,10 +402,7 @@ export default function Home() {
         const tokenIn: 'A' | 'B' = isAtoB ? 'A' : 'B'
         try {
           const quote = await getCLMMQuote(clmmPool.id, tokenIn, amountIn)
-          // Sanity check: contract GetQuote returns theoretical values that can't execute
-          // Using liquidity/4 as very conservative max - the contract is severely broken
-          const maxOutput = clmmPool.liquidity / 4n
-          if (quote > 0n && quote <= maxOutput && (!best || quote > best.amountOut)) {
+          if (quote > 0n && (!best || quote > best.amountOut)) {
             best = { pool: null, clmmPool, poolType: 'clmm', amountOut: quote, tokenIn }
           }
         } catch (e) {
@@ -1236,12 +1233,10 @@ export default function Home() {
                   }
                 }
 
-                // Check for insufficient liquidity - output is 0, price impact > 50%, or CLMM output exceeds pool capacity
+                // Check for insufficient liquidity - output is 0 or price impact > 50%
                 // Only check when quote is fresh (not loading)
-                const clmmExceedsLiquidity = bestQuote?.poolType === 'clmm' && bestQuote.clmmPool &&
-                  bestQuote.amountOut > bestQuote.clmmPool.liquidity / 4n
                 const insufficientLiquidity = !quoteLoading && bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
-                  bestQuote.amountOut === 0n || priceImpactCheck > 50 || clmmExceedsLiquidity
+                  bestQuote.amountOut === 0n || priceImpactCheck > 50
                 )
                 const canSwap = walletAddress && bestQuote && !swapLoading && !insufficientBalance && !insufficientLiquidity
                 return (
