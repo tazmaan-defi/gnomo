@@ -402,10 +402,10 @@ export default function Home() {
         const tokenIn: 'A' | 'B' = isAtoB ? 'A' : 'B'
         try {
           const quote = await getCLMMQuote(clmmPool.id, tokenIn, amountIn)
-          // Sanity check: if quote exceeds pool liquidity, it's likely invalid
-          // (contract may return theoretical values that exceed actual available tokens)
-          // Liquidity in CLMM approximates max extractable amount of either token
-          if (quote > 0n && quote <= clmmPool.liquidity && (!best || quote > best.amountOut)) {
+          // Sanity check: contract GetQuote returns theoretical values that can't execute
+          // Using liquidity/4 as very conservative max - the contract is severely broken
+          const maxOutput = clmmPool.liquidity / 4n
+          if (quote > 0n && quote <= maxOutput && (!best || quote > best.amountOut)) {
             best = { pool: null, clmmPool, poolType: 'clmm', amountOut: quote, tokenIn }
           }
         } catch (e) {
@@ -925,7 +925,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX</h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.3.0</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1239,7 +1239,7 @@ export default function Home() {
                 // Check for insufficient liquidity - output is 0, price impact > 50%, or CLMM output exceeds pool capacity
                 // Only check when quote is fresh (not loading)
                 const clmmExceedsLiquidity = bestQuote?.poolType === 'clmm' && bestQuote.clmmPool &&
-                  bestQuote.amountOut > bestQuote.clmmPool.liquidity
+                  bestQuote.amountOut > bestQuote.clmmPool.liquidity / 4n
                 const insufficientLiquidity = !quoteLoading && bestQuote && fromAmount && parseFloat(fromAmount) > 0 && (
                   bestQuote.amountOut === 0n || priceImpactCheck > 50 || clmmExceedsLiquidity
                 )
@@ -1478,8 +1478,29 @@ export default function Home() {
                         <div><p className="text-[#8b949e]">Active Liquidity</p><p className="font-medium">{fmtAmt(pool.liquidity, 2)}</p></div>
                         <div><p className="text-[#8b949e]">Tick Spacing</p><p className="font-medium">{pool.tickSpacing}</p></div>
                       </div>
-                      <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm">
-                        <div className="flex justify-between">
+                      <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm space-y-1">
+                        {(() => {
+                          // Estimate token amounts from liquidity and price
+                          // For CLMM: tokenA ≈ L * sqrt(P), tokenB ≈ L / sqrt(P)
+                          const price = Number(pool.priceX6) / 1_000_000
+                          const sqrtPrice = Math.sqrt(price)
+                          const liq = Number(pool.liquidity) / 1_000_000
+                          const estTokenA = liq * sqrtPrice
+                          const estTokenB = liq / sqrtPrice
+                          return (
+                            <>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-[#8b949e]">Est. {formatDenom(pool.denomA)}</span>
+                                <span>~{estTokenA.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-[#8b949e]">Est. {formatDenom(pool.denomB)}</span>
+                                <span>~{estTokenB.toFixed(2)}</span>
+                              </div>
+                            </>
+                          )
+                        })()}
+                        <div className="flex justify-between pt-1 border-t border-[#30363d]">
                           <span className="text-[#8b949e]">TVL</span>
                           <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 1_000_000 * 2).toFixed(2)}</span>
                         </div>
