@@ -767,16 +767,117 @@ func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 		return 0
 	}
 
-	// Use safe math to prevent overflow
-	feeAmount := safeMulDiv(amountIn, pool.FeeBPS, 10000)
-	amountAfterFee := amountIn - feeAmount
+	// Simulate the swap without modifying state
+	// Copy pool state for simulation
+	simPriceX6 := pool.PriceX6
+	simLiquidity := pool.Liquidity
+	simCurrentTick := pool.CurrentTick
 
+	var zeroForOne bool
 	if tokenIn == "A" {
-		return safeMulDiv(amountAfterFee, pool.PriceX6, PRECISION)
+		zeroForOne = true
 	} else if tokenIn == "B" {
-		return safeMulDiv(amountAfterFee, PRECISION, pool.PriceX6)
+		zeroForOne = false
+	} else {
+		return 0
 	}
-	return 0
+
+	// Calculate fee
+	feeAmount := safeMulDiv(amountIn, pool.FeeBPS, 10000)
+	amountRemaining := amountIn - feeAmount
+	totalAmountOut := int64(0)
+
+	// Simulate swap with tick crossing (same logic as Swap but read-only)
+	maxIterations := 100
+	for i := 0; i < maxIterations && amountRemaining > 0; i++ {
+		if simLiquidity == 0 {
+			break // No more liquidity
+		}
+
+		// Find next tick (read-only)
+		nextTick := findNextInitializedTick(poolID, simCurrentTick, zeroForOne)
+
+		var amountInStep, amountOutStep int64
+
+		if zeroForOne {
+			// Swapping A for B (price decreases)
+			nextTickPrice := getPriceAtTick(nextTick)
+			if nextTickPrice < getPriceAtTick(MIN_TICK) {
+				nextTickPrice = getPriceAtTick(MIN_TICK)
+			}
+
+			priceDiff := simPriceX6 - nextTickPrice
+			if priceDiff <= 0 {
+				break
+			}
+
+			maxAmountIn := safeMulDiv(simLiquidity, priceDiff, simPriceX6)
+
+			if amountRemaining <= maxAmountIn {
+				amountInStep = amountRemaining
+				amountOutStep = safeMulDiv(amountInStep, simPriceX6, PRECISION)
+				priceChange := safeMulDiv(amountInStep, simPriceX6, simLiquidity)
+				simPriceX6 -= priceChange
+				if simPriceX6 < getPriceAtTick(MIN_TICK) {
+					simPriceX6 = getPriceAtTick(MIN_TICK)
+				}
+			} else {
+				amountInStep = maxAmountIn
+				amountOutStep = safeMulDiv(amountInStep, simPriceX6, PRECISION)
+				simPriceX6 = nextTickPrice
+
+				// Simulate tick crossing - get liquidity delta
+				ticks := tickData[poolID]
+				if ticks != nil {
+					if tickInfo, ok := ticks[nextTick]; ok && tickInfo.Initialized {
+						simLiquidity -= tickInfo.LiquidityNet
+					}
+				}
+				simCurrentTick = nextTick
+			}
+		} else {
+			// Swapping B for A (price increases)
+			nextTickPrice := getPriceAtTick(nextTick)
+			if nextTickPrice > getPriceAtTick(MAX_TICK) {
+				nextTickPrice = getPriceAtTick(MAX_TICK)
+			}
+
+			priceDiff := nextTickPrice - simPriceX6
+			if priceDiff <= 0 {
+				break
+			}
+
+			maxAmountIn := safeMulDiv(simLiquidity, priceDiff, PRECISION)
+
+			if amountRemaining <= maxAmountIn {
+				amountInStep = amountRemaining
+				amountOutStep = safeMulDiv(amountInStep, PRECISION, simPriceX6)
+				priceChange := safeMulDiv(amountInStep, PRECISION, simLiquidity)
+				simPriceX6 += priceChange
+				if simPriceX6 > getPriceAtTick(MAX_TICK) {
+					simPriceX6 = getPriceAtTick(MAX_TICK)
+				}
+			} else {
+				amountInStep = maxAmountIn
+				amountOutStep = safeMulDiv(amountInStep, PRECISION, simPriceX6)
+				simPriceX6 = nextTickPrice
+
+				// Simulate tick crossing
+				ticks := tickData[poolID]
+				if ticks != nil {
+					if tickInfo, ok := ticks[nextTick]; ok && tickInfo.Initialized {
+						simLiquidity += tickInfo.LiquidityNet
+					}
+				}
+				simCurrentTick = nextTick
+			}
+		}
+
+		amountRemaining -= amountInStep
+		totalAmountOut += amountOutStep
+	}
+
+	return totalAmountOut
 }
 
 func GetPriceAtTick(tick int64) int64 {
