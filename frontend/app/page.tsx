@@ -1359,11 +1359,47 @@ export default function Home() {
                   <div className="bg-[#0d1117] rounded-xl p-4">
                     <div className="flex justify-between mb-2"><span className="text-[#8b949e]">{formatDenom(selectedPool.denomA)}</span><span className="text-sm text-[#8b949e]">Balance: {formatBalance(selectedPool.denomA)}</span></div>
                     <input type="text" value={amountA} onChange={(e) => { setLastEditedField('A'); setAmountA(e.target.value) }} placeholder="0.00" className="w-full bg-transparent text-2xl font-medium outline-none" />
+                    <div className="flex gap-2 mt-2">
+                      {[25, 50, 75, 100].map((pct) => {
+                        const bal = balances.get(selectedPool.denomA) || 0n
+                        return (
+                          <button
+                            key={pct}
+                            onClick={() => {
+                              const amt = Number(bal) * pct / 100 / 1_000_000
+                              setAmountA(amt.toFixed(6))
+                              setLastEditedField('A')
+                            }}
+                            className="px-2 py-1 text-xs bg-[#21262d] text-[#8b949e] hover:text-white rounded transition"
+                          >
+                            {pct === 100 ? 'MAX' : `${pct}%`}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                   <div className="flex justify-center"><div className="bg-[#21262d] p-2 rounded-xl"><PlusIcon /></div></div>
                   <div className="bg-[#0d1117] rounded-xl p-4">
                     <div className="flex justify-between mb-2"><span className="text-[#8b949e]">{formatDenom(selectedPool.denomB)}</span><span className="text-sm text-[#8b949e]">Balance: {formatBalance(selectedPool.denomB)}</span></div>
                     <input type="text" value={amountB} onChange={(e) => { setLastEditedField('B'); setAmountB(e.target.value) }} placeholder="0.00" className="w-full bg-transparent text-2xl font-medium outline-none" />
+                    <div className="flex gap-2 mt-2">
+                      {[25, 50, 75, 100].map((pct) => {
+                        const bal = balances.get(selectedPool.denomB) || 0n
+                        return (
+                          <button
+                            key={pct}
+                            onClick={() => {
+                              const amt = Number(bal) * pct / 100 / 1_000_000
+                              setAmountB(amt.toFixed(6))
+                              setLastEditedField('B')
+                            }}
+                            className="px-2 py-1 text-xs bg-[#21262d] text-[#8b949e] hover:text-white rounded transition"
+                          >
+                            {pct === 100 ? 'MAX' : `${pct}%`}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                   <div className="p-3 bg-[#0d1117] rounded-xl text-sm space-y-1">
                     <div className="flex justify-between text-[#8b949e]"><span>Current Price</span><span>1 {formatDenom(selectedPool.denomA)} = {calcPrice(selectedPool.reserveA, selectedPool.reserveB)} {formatDenom(selectedPool.denomB)}</span></div>
@@ -1551,22 +1587,27 @@ export default function Home() {
                     const pool = clmmPools.find(p => p.id === pos.poolId)
                     if (!pool) return null
                     const inRange = pool.currentTick >= pos.tickLower && pool.currentTick < pos.tickUpper
-                    // Calculate token amounts from liquidity and price range
+                    // Calculate token amounts from liquidity using sqrt-based CLMM math
                     const pL = tickToPrice(pos.tickLower)
                     const pU = tickToPrice(pos.tickUpper)
                     const pC = Number(pool.priceX6) / 1_000_000
                     const liq = Number(pos.liquidity)
+                    const sqrtPL = Math.sqrt(pL)
+                    const sqrtPU = Math.sqrt(pU)
+                    const sqrtPC = Math.sqrt(pC)
                     let amountA = 0, amountB = 0
                     if (pC <= pL) {
-                      // All in token A
-                      amountA = liq * (pU - pL) / (pL * pU)
+                      // All in token A: amt0 = L * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
+                      amountA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
                     } else if (pC >= pU) {
-                      // All in token B
-                      amountB = liq * (pU - pL)
+                      // All in token B: amt1 = L * (sqrtPU - sqrtPL)
+                      amountB = liq * (sqrtPU - sqrtPL)
                     } else {
-                      // Split
-                      amountA = liq * (pU - pC) / (pC * pU)
-                      amountB = liq * (pC - pL)
+                      // Split: use proper sqrt formulas
+                      // amt0 = L * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+                      // amt1 = L * (sqrtPC - sqrtPL)
+                      amountA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+                      amountB = liq * (sqrtPC - sqrtPL)
                     }
                     return (
                       <div key={pos.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d] card-hover">
@@ -1710,15 +1751,45 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="bg-[#0d1117] rounded-xl p-3">
                           <label className="text-sm text-[#8b949e] block mb-2">Min Price</label>
-                          <input type="text" value={mintPriceLower} onChange={(e) => { setMintPriceLower(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned) } }} placeholder="0.01" className="w-full bg-transparent text-xl font-medium outline-none" />
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => { const newTick = mintTickLower - selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <input type="text" value={mintPriceLower} onChange={(e) => { setMintPriceLower(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned) } }} placeholder="0.01" className="flex-1 bg-transparent text-xl font-medium outline-none text-center" />
+                            <button onClick={() => { const newTick = mintTickLower + selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                            </button>
+                          </div>
                           <input type="range" min={-1000} max={0} step={selectedClmmPool.tickSpacing} value={mintTickLower} onChange={(e) => { const tick = parseInt(e.target.value); setMintTickLower(tick); setMintPriceLower(tickToPrice(tick).toFixed(4)) }} className="w-full mt-2" />
-                          <span className="text-xs text-[#484f58]">tick {mintTickLower}</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-[#484f58]">tick</span>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { const newTick = mintTickLower - selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">−</button>
+                              <input type="number" value={mintTickLower} onChange={(e) => { const tick = parseInt(e.target.value) || 0; const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned); setMintPriceLower(tickToPrice(aligned).toFixed(4)) }} className="w-16 bg-[#21262d] rounded px-1 py-0.5 text-xs text-center outline-none" />
+                              <button onClick={() => { const newTick = mintTickLower + selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">+</button>
+                            </div>
+                          </div>
                         </div>
                         <div className="bg-[#0d1117] rounded-xl p-3">
                           <label className="text-sm text-[#8b949e] block mb-2">Max Price</label>
-                          <input type="text" value={mintPriceUpper} onChange={(e) => { setMintPriceUpper(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned) } }} placeholder="100" className="w-full bg-transparent text-xl font-medium outline-none" />
+                          <div className="flex items-center gap-2">
+                            <button onClick={() => { const newTick = mintTickUpper - selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            </button>
+                            <input type="text" value={mintPriceUpper} onChange={(e) => { setMintPriceUpper(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned) } }} placeholder="100" className="flex-1 bg-transparent text-xl font-medium outline-none text-center" />
+                            <button onClick={() => { const newTick = mintTickUpper + selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+                            </button>
+                          </div>
                           <input type="range" min={0} max={1000} step={selectedClmmPool.tickSpacing} value={mintTickUpper} onChange={(e) => { const tick = parseInt(e.target.value); setMintTickUpper(tick); setMintPriceUpper(tickToPrice(tick).toFixed(4)) }} className="w-full mt-2" />
-                          <span className="text-xs text-[#484f58]">tick {mintTickUpper}</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-xs text-[#484f58]">tick</span>
+                            <div className="flex items-center gap-1">
+                              <button onClick={() => { const newTick = mintTickUpper - selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">−</button>
+                              <input type="number" value={mintTickUpper} onChange={(e) => { const tick = parseInt(e.target.value) || 0; const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned); setMintPriceUpper(tickToPrice(aligned).toFixed(4)) }} className="w-16 bg-[#21262d] rounded px-1 py-0.5 text-xs text-center outline-none" />
+                              <button onClick={() => { const newTick = mintTickUpper + selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">+</button>
+                            </div>
+                          </div>
                         </div>
                       </div>
                       <div className="p-3 bg-[#0d1117] rounded-xl text-sm space-y-2">
@@ -1801,6 +1872,28 @@ export default function Home() {
                                 className={`w-full bg-transparent text-2xl font-medium outline-none ${!needsA ? 'text-[#484f58]' : ''}`}
                                 disabled={!needsA}
                               />
+                              {needsA && (
+                                <div className="flex gap-2 mt-2">
+                                  {[25, 50, 75, 100].map((pct) => {
+                                    const bal = balances.get(selectedClmmPool.denomA) || 0n
+                                    return (
+                                      <button
+                                        key={pct}
+                                        onClick={() => {
+                                          const amt = Number(bal) * pct / 100 / 1_000_000
+                                          setMintAmountA(amt.toFixed(6))
+                                          if (needsB) {
+                                            setMintAmountB(calcAmountB(amt).toFixed(6))
+                                          }
+                                        }}
+                                        className="px-2 py-1 text-xs bg-[#21262d] text-[#8b949e] hover:text-white rounded transition"
+                                      >
+                                        {pct === 100 ? 'MAX' : `${pct}%`}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
                             </div>
                             <div className="bg-[#0d1117] rounded-xl p-4">
                               <div className="flex justify-between mb-2">
@@ -1823,6 +1916,28 @@ export default function Home() {
                                 className={`w-full bg-transparent text-2xl font-medium outline-none ${!needsB ? 'text-[#484f58]' : ''}`}
                                 disabled={!needsB}
                               />
+                              {needsB && (
+                                <div className="flex gap-2 mt-2">
+                                  {[25, 50, 75, 100].map((pct) => {
+                                    const bal = balances.get(selectedClmmPool.denomB) || 0n
+                                    return (
+                                      <button
+                                        key={pct}
+                                        onClick={() => {
+                                          const amt = Number(bal) * pct / 100 / 1_000_000
+                                          setMintAmountB(amt.toFixed(6))
+                                          if (needsA) {
+                                            setMintAmountA(calcAmountA(amt).toFixed(6))
+                                          }
+                                        }}
+                                        className="px-2 py-1 text-xs bg-[#21262d] text-[#8b949e] hover:text-white rounded transition"
+                                      >
+                                        {pct === 100 ? 'MAX' : `${pct}%`}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              )}
                             </div>
                             {(parseFloat(mintAmountA) > 0 || parseFloat(mintAmountB) > 0) && (
                               <div className="p-3 bg-[#21262d] rounded-xl text-sm">
