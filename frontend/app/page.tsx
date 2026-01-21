@@ -165,6 +165,43 @@ export default function Home() {
   const [mintPriceLower, setMintPriceLower] = useState('0.5')
   const [mintPriceUpper, setMintPriceUpper] = useState('2.0')
 
+  // Auto-recalculate token amounts when price range changes
+  useEffect(() => {
+    if (!selectedClmmPool || !mintAmountA) return
+    const amtA = parseFloat(mintAmountA)
+    if (amtA <= 0) return
+
+    const currentPrice = Number(selectedClmmPool.priceX6) / 1_000_000
+    const pL = parseFloat(mintPriceLower) || 0
+    const pU = parseFloat(mintPriceUpper) || 0
+
+    if (pL <= 0 || pU <= pL || currentPrice <= 0) return
+
+    // Determine which tokens are needed
+    const needsA = currentPrice > pL
+    const needsB = currentPrice < pU
+
+    if (!needsA) {
+      setMintAmountA('0')
+      return
+    }
+    if (!needsB) {
+      setMintAmountB('0')
+      return
+    }
+
+    // Calculate amountB using sqrt-based CLMM math
+    const sqrtPL = Math.sqrt(pL)
+    const sqrtPU = Math.sqrt(pU)
+    const sqrtPC = Math.sqrt(currentPrice)
+
+    if (sqrtPU <= sqrtPC) return
+    const L = amtA * sqrtPC * sqrtPU / (sqrtPU - sqrtPC)
+    const amtB = L * (sqrtPC - sqrtPL)
+
+    setMintAmountB(amtB.toFixed(6))
+  }, [mintPriceLower, mintPriceUpper, selectedClmmPool])
+
   // Price chart state
   const [selectedChartPair, setSelectedChartPair] = useState<string | null>(null)
   const [priceHistoryData, setPriceHistoryData] = useState<Map<string, PricePoint[]>>(new Map())
@@ -948,7 +985,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.0</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.1</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
