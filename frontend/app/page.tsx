@@ -1751,12 +1751,12 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-3">
                         <div className="bg-[#0d1117] rounded-xl p-3">
                           <label className="text-sm text-[#8b949e] block mb-2">Min Price</label>
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => { const newTick = mintTickLower - selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { const newTick = mintTickLower - selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="flex-shrink-0 p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                             </button>
-                            <input type="text" value={mintPriceLower} onChange={(e) => { setMintPriceLower(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned) } }} placeholder="0.01" className="flex-1 bg-transparent text-xl font-medium outline-none text-center" />
-                            <button onClick={() => { const newTick = mintTickLower + selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                            <input type="text" value={mintPriceLower} onChange={(e) => { setMintPriceLower(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned) } }} placeholder="0.01" className="flex-1 min-w-0 bg-transparent text-xl font-medium outline-none text-center" />
+                            <button onClick={() => { const newTick = mintTickLower + selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="flex-shrink-0 p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
                             </button>
                           </div>
@@ -1772,12 +1772,12 @@ export default function Home() {
                         </div>
                         <div className="bg-[#0d1117] rounded-xl p-3">
                           <label className="text-sm text-[#8b949e] block mb-2">Max Price</label>
-                          <div className="flex items-center gap-2">
-                            <button onClick={() => { const newTick = mintTickUpper - selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                          <div className="flex items-center gap-1">
+                            <button onClick={() => { const newTick = mintTickUpper - selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="flex-shrink-0 p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
                             </button>
-                            <input type="text" value={mintPriceUpper} onChange={(e) => { setMintPriceUpper(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned) } }} placeholder="100" className="flex-1 bg-transparent text-xl font-medium outline-none text-center" />
-                            <button onClick={() => { const newTick = mintTickUpper + selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
+                            <input type="text" value={mintPriceUpper} onChange={(e) => { setMintPriceUpper(e.target.value); const p = parseFloat(e.target.value); if (p > 0) { const tick = priceToTick(p); const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned) } }} placeholder="100" className="flex-1 min-w-0 bg-transparent text-xl font-medium outline-none text-center" />
+                            <button onClick={() => { const newTick = mintTickUpper + selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="flex-shrink-0 p-1.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition">
                               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
                             </button>
                           </div>
