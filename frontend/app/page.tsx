@@ -963,23 +963,27 @@ export default function Home() {
     return sum + reserveAUsd + reserveBUsd
   }, 0)
 
-  // For CLMM, estimate TVL using proper sqrt math (same as pool display)
-  const clmmTvlUsd = clmmPools.reduce((sum, pool) => {
+  // For CLMM, sum actual position amounts (accurate method)
+  const clmmTvlUsd = clmmPositions.reduce((sum, pos) => {
+    const pool = clmmPools.find(p => p.id === pos.poolId)
+    if (!pool) return sum
     const pC = Number(pool.priceX6) / 1_000_000
-    const liq = Number(pool.liquidity)
-    const sqrtPL = Math.sqrt(0.5)
-    const sqrtPU = Math.sqrt(2.0)
+    const pL = tickToPrice(pos.tickLower)
+    const pU = tickToPrice(pos.tickUpper)
+    const liq = Number(pos.liquidity)
+    const sqrtPL = Math.sqrt(pL)
+    const sqrtPU = Math.sqrt(pU)
     const sqrtPC = Math.sqrt(pC)
-    let estA = 0, estB = 0
-    if (pC <= 0.5) {
-      estA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
-    } else if (pC >= 2.0) {
-      estB = liq * (sqrtPU - sqrtPL)
+    let amtA = 0, amtB = 0
+    if (pC <= pL) {
+      amtA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
+    } else if (pC >= pU) {
+      amtB = liq * (sqrtPU - sqrtPL)
     } else {
-      estA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
-      estB = liq * (sqrtPC - sqrtPL)
+      amtA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+      amtB = liq * (sqrtPC - sqrtPL)
     }
-    const tvl = (estA + estB) / 1_000_000 * GNOT_PRICE_USD
+    const tvl = (amtA + amtB) / 1_000_000 * GNOT_PRICE_USD
     return sum + tvl
   }, 0)
 
@@ -1009,7 +1013,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.8</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.9</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1597,29 +1601,32 @@ export default function Home() {
                       </div>
                       <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm space-y-1">
                         {(() => {
-                          // Use proper CLMM sqrt math (same as positions)
-                          // Assume typical range of 0.5 to 2.0 for estimation
+                          // Sum actual position amounts for this pool (accurate method)
                           const pC = Number(pool.priceX6) / 1_000_000
-                          const pL = 0.5  // typical lower bound
-                          const pU = 2.0  // typical upper bound
-                          const liq = Number(pool.liquidity)
-                          const sqrtPL = Math.sqrt(pL)
-                          const sqrtPU = Math.sqrt(pU)
-                          const sqrtPC = Math.sqrt(pC)
+                          const poolPositions = clmmPositions.filter(p => p.poolId === pool.id)
 
-                          let estTokenA = 0, estTokenB = 0
-                          if (pC <= pL) {
-                            estTokenA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
-                          } else if (pC >= pU) {
-                            estTokenB = liq * (sqrtPU - sqrtPL)
-                          } else {
-                            estTokenA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
-                            estTokenB = liq * (sqrtPC - sqrtPL)
+                          let totalA = 0, totalB = 0
+                          for (const pos of poolPositions) {
+                            const pL = tickToPrice(pos.tickLower)
+                            const pU = tickToPrice(pos.tickUpper)
+                            const liq = Number(pos.liquidity)
+                            const sqrtPL = Math.sqrt(pL)
+                            const sqrtPU = Math.sqrt(pU)
+                            const sqrtPC = Math.sqrt(pC)
+
+                            let amtA = 0, amtB = 0
+                            if (pC <= pL) {
+                              amtA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
+                            } else if (pC >= pU) {
+                              amtB = liq * (sqrtPU - sqrtPL)
+                            } else {
+                              amtA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+                              amtB = liq * (sqrtPC - sqrtPL)
+                            }
+                            totalA += amtA / 1_000_000
+                            totalB += amtB / 1_000_000
                           }
-                          // Convert from raw to display (6 decimals)
-                          estTokenA = estTokenA / 1_000_000
-                          estTokenB = estTokenB / 1_000_000
-                          const totalTokens = estTokenA + estTokenB
+                          const totalTokens = totalA + totalB
 
                           return (
                             <>
@@ -1629,36 +1636,19 @@ export default function Home() {
                               </div>
                               <div className="flex justify-between text-xs">
                                 <span className="text-[#8b949e]">Est. {formatDenom(pool.denomA)}</span>
-                                <span>~{estTokenA.toFixed(2)}</span>
+                                <span>~{totalA.toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between text-xs">
                                 <span className="text-[#8b949e]">Est. {formatDenom(pool.denomB)}</span>
-                                <span>~{estTokenB.toFixed(2)}</span>
+                                <span>~{totalB.toFixed(2)}</span>
+                              </div>
+                              <div className="flex justify-between pt-1 border-t border-[#30363d]">
+                                <span className="text-[#8b949e]">TVL</span>
+                                <span className="font-medium text-[#238636]">~${totalTokens.toFixed(2)}</span>
                               </div>
                             </>
                           )
                         })()}
-                        <div className="flex justify-between pt-1 border-t border-[#30363d]">
-                          <span className="text-[#8b949e]">TVL</span>
-                          {(() => {
-                            const pC = Number(pool.priceX6) / 1_000_000
-                            const liq = Number(pool.liquidity)
-                            const sqrtPL = Math.sqrt(0.5)
-                            const sqrtPU = Math.sqrt(2.0)
-                            const sqrtPC = Math.sqrt(pC)
-                            let estA = 0, estB = 0
-                            if (pC <= 0.5) {
-                              estA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
-                            } else if (pC >= 2.0) {
-                              estB = liq * (sqrtPU - sqrtPL)
-                            } else {
-                              estA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
-                              estB = liq * (sqrtPC - sqrtPL)
-                            }
-                            const tvl = (estA + estB) / 1_000_000
-                            return <span className="font-medium text-[#238636]">~${tvl.toFixed(2)}</span>
-                          })()}
-                        </div>
                       </div>
                       <button onClick={() => { setSelectedClmmPool(pool); setClmmTab('mint') }} className="w-full mt-3 py-2 rounded-lg text-sm font-medium bg-[#238636] hover:bg-[#2ea043] text-white transition">Add Position</button>
                     </div>
