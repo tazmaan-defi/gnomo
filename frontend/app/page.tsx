@@ -965,8 +965,8 @@ export default function Home() {
 
   // For CLMM, estimate TVL from liquidity (simplified - would need actual position data for accuracy)
   const clmmTvlUsd = clmmPools.reduce((sum, pool) => {
-    // Rough estimate: liquidity value = liquidity / 10_000 * 2 (adjusted for precision factors)
-    const liqValue = Number(pool.liquidity) / 10_000 * 2 * GNOT_PRICE_USD
+    // Rough estimate: liquidity value with corrected contract scaling (PRECISION = 10^6)
+    const liqValue = Number(pool.liquidity) / 1_000_000 * 2 * GNOT_PRICE_USD
     return sum + liqValue
   }, 0)
 
@@ -996,7 +996,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.6</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.7</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1580,17 +1580,17 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{formatPriceX6(pool.priceX6)}</p></div>
                         <div><p className="text-[#8b949e]">Current Tick</p><p className="font-medium">{pool.currentTick}</p></div>
-                        <div><p className="text-[#8b949e]">Total Tokens</p><p className="font-medium">~{(Number(pool.liquidity) / 10_000 * 2).toFixed(0)}</p></div>
+                        <div><p className="text-[#8b949e]">Total Tokens</p><p className="font-medium">~{(Number(pool.liquidity) / 1_000_000 * 2).toFixed(0)}</p></div>
                         <div><p className="text-[#8b949e]">Tick Spacing</p><p className="font-medium">{pool.tickSpacing}</p></div>
                       </div>
                       <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm space-y-1">
                         {(() => {
                           // Estimate token amounts from liquidity and price
                           // For CLMM: tokenA ≈ L * sqrt(P), tokenB ≈ L / sqrt(P)
-                          // Adjusted for precision factors (10_000x total)
+                          // Contract uses PRECISION = 10^6 scaling
                           const price = Number(pool.priceX6) / 1_000_000
                           const sqrtPrice = Math.sqrt(price)
-                          const liq = Number(pool.liquidity) / 10_000
+                          const liq = Number(pool.liquidity) / 1_000_000
                           const estTokenA = liq * sqrtPrice
                           const estTokenB = liq / sqrtPrice
                           return (
@@ -1608,7 +1608,7 @@ export default function Home() {
                         })()}
                         <div className="flex justify-between pt-1 border-t border-[#30363d]">
                           <span className="text-[#8b949e]">TVL</span>
-                          <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 10_000 * 2).toFixed(2)}</span>
+                          <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 1_000_000 * 2).toFixed(2)}</span>
                         </div>
                       </div>
                       <button onClick={() => { setSelectedClmmPool(pool); setClmmTab('mint') }} className="w-full mt-3 py-2 rounded-lg text-sm font-medium bg-[#238636] hover:bg-[#2ea043] text-white transition">Add Position</button>
@@ -1640,8 +1640,8 @@ export default function Home() {
                     const pL = tickToPrice(pos.tickLower)
                     const pU = tickToPrice(pos.tickUpper)
                     const pC = Number(pool.priceX6) / 1_000_000
-                    // Scale liquidity first (same as pools display)
-                    const liq = Number(pos.liquidity) / 10_000
+                    // Use raw liquidity - contract now has correct scaling
+                    const liq = Number(pos.liquidity)
                     const sqrtPL = Math.sqrt(pL)
                     const sqrtPU = Math.sqrt(pU)
                     const sqrtPC = Math.sqrt(pC)
@@ -1659,6 +1659,9 @@ export default function Home() {
                       amountA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
                       amountB = liq * (sqrtPC - sqrtPL)
                     }
+                    // Convert from raw to display (6 decimals)
+                    amountA = amountA / 1_000_000
+                    amountB = amountB / 1_000_000
                     return (
                       <div key={pos.id} className="p-4 bg-[#0d1117] rounded-xl border border-[#30363d] card-hover">
                         <div className="flex items-center justify-between mb-3">
@@ -1673,7 +1676,7 @@ export default function Home() {
                           </Tooltip>
                         </div>
                         <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div><p className="text-[#8b949e]">Total Tokens</p><p className="font-medium">~{(Number(pos.liquidity) / 10_000 * 2).toFixed(0)}</p></div>
+                          <div><p className="text-[#8b949e]">Total Tokens</p><p className="font-medium">~{(amountA + amountB).toFixed(0)}</p></div>
                           <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{pC.toFixed(4)}</p></div>
                         </div>
                         {/* Range Visualization */}
