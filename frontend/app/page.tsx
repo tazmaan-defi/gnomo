@@ -963,11 +963,24 @@ export default function Home() {
     return sum + reserveAUsd + reserveBUsd
   }, 0)
 
-  // For CLMM, estimate TVL from liquidity (simplified - would need actual position data for accuracy)
+  // For CLMM, estimate TVL using proper sqrt math (same as pool display)
   const clmmTvlUsd = clmmPools.reduce((sum, pool) => {
-    // Rough estimate: liquidity value with corrected contract scaling (PRECISION = 10^6)
-    const liqValue = Number(pool.liquidity) / 1_000_000 * 2 * GNOT_PRICE_USD
-    return sum + liqValue
+    const pC = Number(pool.priceX6) / 1_000_000
+    const liq = Number(pool.liquidity)
+    const sqrtPL = Math.sqrt(0.5)
+    const sqrtPU = Math.sqrt(2.0)
+    const sqrtPC = Math.sqrt(pC)
+    let estA = 0, estB = 0
+    if (pC <= 0.5) {
+      estA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
+    } else if (pC >= 2.0) {
+      estB = liq * (sqrtPU - sqrtPL)
+    } else {
+      estA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+      estB = liq * (sqrtPC - sqrtPL)
+    }
+    const tvl = (estA + estB) / 1_000_000 * GNOT_PRICE_USD
+    return sum + tvl
   }, 0)
 
   const totalTVL = v2TvlUsd + clmmTvlUsd
@@ -996,7 +1009,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.7</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.8</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1580,21 +1593,40 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{formatPriceX6(pool.priceX6)}</p></div>
                         <div><p className="text-[#8b949e]">Current Tick</p><p className="font-medium">{pool.currentTick}</p></div>
-                        <div><p className="text-[#8b949e]">Total Tokens</p><p className="font-medium">~{(Number(pool.liquidity) / 1_000_000 * 2).toFixed(0)}</p></div>
                         <div><p className="text-[#8b949e]">Tick Spacing</p><p className="font-medium">{pool.tickSpacing}</p></div>
                       </div>
                       <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm space-y-1">
                         {(() => {
-                          // Estimate token amounts from liquidity and price
-                          // For CLMM: tokenA ≈ L * sqrt(P), tokenB ≈ L / sqrt(P)
-                          // Contract uses PRECISION = 10^6 scaling
-                          const price = Number(pool.priceX6) / 1_000_000
-                          const sqrtPrice = Math.sqrt(price)
-                          const liq = Number(pool.liquidity) / 1_000_000
-                          const estTokenA = liq * sqrtPrice
-                          const estTokenB = liq / sqrtPrice
+                          // Use proper CLMM sqrt math (same as positions)
+                          // Assume typical range of 0.5 to 2.0 for estimation
+                          const pC = Number(pool.priceX6) / 1_000_000
+                          const pL = 0.5  // typical lower bound
+                          const pU = 2.0  // typical upper bound
+                          const liq = Number(pool.liquidity)
+                          const sqrtPL = Math.sqrt(pL)
+                          const sqrtPU = Math.sqrt(pU)
+                          const sqrtPC = Math.sqrt(pC)
+
+                          let estTokenA = 0, estTokenB = 0
+                          if (pC <= pL) {
+                            estTokenA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
+                          } else if (pC >= pU) {
+                            estTokenB = liq * (sqrtPU - sqrtPL)
+                          } else {
+                            estTokenA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+                            estTokenB = liq * (sqrtPC - sqrtPL)
+                          }
+                          // Convert from raw to display (6 decimals)
+                          estTokenA = estTokenA / 1_000_000
+                          estTokenB = estTokenB / 1_000_000
+                          const totalTokens = estTokenA + estTokenB
+
                           return (
                             <>
+                              <div className="flex justify-between text-xs mb-1">
+                                <span className="text-[#8b949e]">Total Tokens</span>
+                                <span>~{totalTokens.toFixed(0)}</span>
+                              </div>
                               <div className="flex justify-between text-xs">
                                 <span className="text-[#8b949e]">Est. {formatDenom(pool.denomA)}</span>
                                 <span>~{estTokenA.toFixed(2)}</span>
@@ -1608,7 +1640,24 @@ export default function Home() {
                         })()}
                         <div className="flex justify-between pt-1 border-t border-[#30363d]">
                           <span className="text-[#8b949e]">TVL</span>
-                          <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 1_000_000 * 2).toFixed(2)}</span>
+                          {(() => {
+                            const pC = Number(pool.priceX6) / 1_000_000
+                            const liq = Number(pool.liquidity)
+                            const sqrtPL = Math.sqrt(0.5)
+                            const sqrtPU = Math.sqrt(2.0)
+                            const sqrtPC = Math.sqrt(pC)
+                            let estA = 0, estB = 0
+                            if (pC <= 0.5) {
+                              estA = liq * (sqrtPU - sqrtPL) / (sqrtPL * sqrtPU)
+                            } else if (pC >= 2.0) {
+                              estB = liq * (sqrtPU - sqrtPL)
+                            } else {
+                              estA = liq * (sqrtPU - sqrtPC) / (sqrtPC * sqrtPU)
+                              estB = liq * (sqrtPC - sqrtPL)
+                            }
+                            const tvl = (estA + estB) / 1_000_000
+                            return <span className="font-medium text-[#238636]">~${tvl.toFixed(2)}</span>
+                          })()}
                         </div>
                       </div>
                       <button onClick={() => { setSelectedClmmPool(pool); setClmmTab('mint') }} className="w-full mt-3 py-2 rounded-lg text-sm font-medium bg-[#238636] hover:bg-[#2ea043] text-white transition">Add Position</button>
