@@ -204,7 +204,7 @@ export async function getPositionsByOwner(owner: string): Promise<number[]> {
     const result = await queryEval(`GetPositionsByOwner("${owner}")`)
     // Parse array: (slice[...] []uint64) or (nil []uint64)
     if (result.includes('nil')) return []
-    
+
     const match = result.match(/slice\[([^\]]*)\]/)
     if (match && match[1]) {
       // Format: (1 uint64, 2 uint64, ...)
@@ -216,6 +216,18 @@ export async function getPositionsByOwner(owner: string): Promise<number[]> {
     console.error('Failed to get positions by owner:', e)
     return []
   }
+}
+
+export async function getAllCLMMPositions(): Promise<CLMMPosition[]> {
+  const count = await getPositionCount()
+  const positions: CLMMPosition[] = []
+
+  for (let i = 0; i < count; i++) {
+    const pos = await getPosition(i)
+    if (pos && pos.liquidity > 0n) positions.push(pos)
+  }
+
+  return positions
 }
 
 export async function getCLMMQuote(

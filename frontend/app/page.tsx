@@ -22,6 +22,7 @@ import {
 } from '@/lib/adena'
 import {
   getAllCLMMPools,
+  getAllCLMMPositions,
   getPositionsByOwner,
   getPosition,
   getCLMMQuote,
@@ -148,6 +149,7 @@ export default function Home() {
 
   const [clmmPools, setClmmPools] = useState<CLMMPool[]>([])
   const [clmmPositions, setClmmPositions] = useState<CLMMPosition[]>([])
+  const [allClmmPositions, setAllClmmPositions] = useState<CLMMPosition[]>([])  // All positions for pool TVL
   const [positionFees, setPositionFees] = useState<Map<number, { feesA: bigint; feesB: bigint }>>(new Map())
   const [clmmTab, setClmmTab] = useState<'pools' | 'positions' | 'create' | 'mint'>('pools')
   const [selectedClmmPool, setSelectedClmmPool] = useState<CLMMPool | null>(null)
@@ -346,16 +348,19 @@ export default function Home() {
   }, [fromToken, toToken])
 
   useEffect(() => {
-    const fetchClmmPools = async () => {
+    const fetchClmmData = async () => {
       try {
         const pools = await getAllCLMMPools()
         setClmmPools(pools)
+        // Fetch all positions for pool TVL display
+        const allPositions = await getAllCLMMPositions()
+        setAllClmmPositions(allPositions)
       } catch (e) {
-        console.error('Failed to fetch CLMM pools:', e)
+        console.error('Failed to fetch CLMM data:', e)
       }
     }
-    fetchClmmPools()
-    const interval = setInterval(fetchClmmPools, 60000)
+    fetchClmmData()
+    const interval = setInterval(fetchClmmData, 60000)
     return () => clearInterval(interval)
   }, [])
 
@@ -624,6 +629,9 @@ export default function Home() {
       setPools(poolData)
       const clmmData = await getAllCLMMPools()
       setClmmPools(clmmData)
+      // Refresh all positions for pool TVL display
+      const allPositions = await getAllCLMMPositions()
+      setAllClmmPositions(allPositions)
 
       // Record prices for charts
       for (const pool of poolData) {
@@ -964,7 +972,7 @@ export default function Home() {
   }, 0)
 
   // For CLMM, sum actual position amounts (accurate method)
-  const clmmTvlUsd = clmmPositions.reduce((sum, pos) => {
+  const clmmTvlUsd = allClmmPositions.reduce((sum, pos) => {
     const pool = clmmPools.find(p => p.id === pos.poolId)
     if (!pool) return sum
     const pC = Number(pool.priceX6) / 1_000_000
@@ -1013,7 +1021,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.9</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.0</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1603,7 +1611,7 @@ export default function Home() {
                         {(() => {
                           // Sum actual position amounts for this pool (accurate method)
                           const pC = Number(pool.priceX6) / 1_000_000
-                          const poolPositions = clmmPositions.filter(p => p.poolId === pool.id)
+                          const poolPositions = allClmmPositions.filter(p => p.poolId === pool.id)
 
                           let totalA = 0, totalB = 0
                           for (const pos of poolPositions) {
