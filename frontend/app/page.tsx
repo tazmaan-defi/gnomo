@@ -954,8 +954,8 @@ export default function Home() {
 
   // For CLMM, estimate TVL from liquidity (simplified - would need actual position data for accuracy)
   const clmmTvlUsd = clmmPools.reduce((sum, pool) => {
-    // Rough estimate: liquidity value = liquidity / 1e3 * 2 (adjusted for sqrt precision factor)
-    const liqValue = Number(pool.liquidity) / 1_000 * 2 * GNOT_PRICE_USD
+    // Rough estimate: liquidity value = liquidity / 10_000 * 2 (adjusted for precision factors)
+    const liqValue = Number(pool.liquidity) / 10_000 * 2 * GNOT_PRICE_USD
     return sum + liqValue
   }, 0)
 
@@ -985,7 +985,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.2</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.3</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1576,10 +1576,10 @@ export default function Home() {
                         {(() => {
                           // Estimate token amounts from liquidity and price
                           // For CLMM: tokenA ≈ L * sqrt(P), tokenB ≈ L / sqrt(P)
-                          // Adjusted for sqrt precision factor (1000x)
+                          // Adjusted for precision factors (10_000x total)
                           const price = Number(pool.priceX6) / 1_000_000
                           const sqrtPrice = Math.sqrt(price)
-                          const liq = Number(pool.liquidity) / 1_000
+                          const liq = Number(pool.liquidity) / 10_000
                           const estTokenA = liq * sqrtPrice
                           const estTokenB = liq / sqrtPrice
                           return (
@@ -1597,7 +1597,7 @@ export default function Home() {
                         })()}
                         <div className="flex justify-between pt-1 border-t border-[#30363d]">
                           <span className="text-[#8b949e]">TVL</span>
-                          <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 1_000 * 2).toFixed(2)}</span>
+                          <span className="font-medium text-[#238636]">~${(Number(pool.liquidity) / 10_000 * 2).toFixed(2)}</span>
                         </div>
                       </div>
                       <button onClick={() => { setSelectedClmmPool(pool); setClmmTab('mint') }} className="w-full mt-3 py-2 rounded-lg text-sm font-medium bg-[#238636] hover:bg-[#2ea043] text-white transition">Add Position</button>
@@ -1703,15 +1703,15 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="mt-3 pt-3 border-t border-[#21262d] grid grid-cols-2 gap-4 text-sm">
-                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomA)} Amount</p><p className="font-medium text-[#238636]">{amountA > 0 ? (amountA / 1_000).toFixed(4) : '0'}</p></div>
-                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomB)} Amount</p><p className="font-medium text-[#238636]">{amountB > 0 ? (amountB / 1_000).toFixed(4) : '0'}</p></div>
+                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomA)} Amount</p><p className="font-medium text-[#238636]">{amountA > 0 ? (amountA / 10_000).toFixed(4) : '0'}</p></div>
+                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomB)} Amount</p><p className="font-medium text-[#238636]">{amountB > 0 ? (amountB / 10_000).toFixed(4) : '0'}</p></div>
                         </div>
                         <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm">
                           <div className="flex justify-between">
                             <span className="text-[#8b949e]">Position Value</span>
                             <span className="font-medium text-[#238636]">
-                              {/* Show value - adjusted for sqrt precision (1000x factor) */}
-                              ~{((amountA / 1_000) + (amountB / 1_000) / pC).toFixed(2)} {formatCLMMDenom(pool.denomA)}
+                              {/* Show value - adjusted for precision factors (10_000x) */}
+                              ~{((amountA / 10_000) + (amountB / 10_000) / pC).toFixed(2)} {formatCLMMDenom(pool.denomA)}
                             </span>
                           </div>
                         </div>
