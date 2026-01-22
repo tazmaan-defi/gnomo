@@ -195,18 +195,16 @@ func getAmountsForLiquidity(pL, pU, pC, liq int64) (int64, int64) {
 		return 0, 0
 	}
 
-	sqrtPrecision := int64(1000) // sqrt(PRECISION)
 	sqrtPL := isqrt(pL * PRECISION)
 	sqrtPU := isqrt(pU * PRECISION)
 	sqrtPC := isqrt(pC * PRECISION)
 
 	if pC <= pL {
 		// Price below range: all token0
-		// amt0 = L * (sqrt(pU) - sqrt(pL)) / (sqrt(pL) * sqrt(pU) / sqrtPrecision)
 		if sqrtPL == 0 || sqrtPU == 0 {
 			return 0, 0
 		}
-		denom := safeMulDiv(sqrtPL, sqrtPU, sqrtPrecision*PRECISION)
+		denom := safeMulDiv(sqrtPL, sqrtPU, PRECISION)
 		if denom == 0 {
 			return 0, 0
 		}
@@ -214,19 +212,16 @@ func getAmountsForLiquidity(pL, pU, pC, liq int64) (int64, int64) {
 		return amt0, 0
 	} else if pC >= pU {
 		// Price above range: all token1
-		// amt1 = L * (sqrt(pU) - sqrt(pL)) / sqrtPrecision
-		amt1 := safeMulDiv(liq, sqrtPU-sqrtPL, sqrtPrecision*PRECISION)
+		amt1 := safeMulDiv(liq, sqrtPU-sqrtPL, PRECISION)
 		return 0, amt1
 	} else {
 		// Price in range: mix of both tokens
-		// amt0 = L * (sqrt(pU) - sqrt(pC)) / (sqrt(pC) * sqrt(pU) / sqrtPrecision)
-		// amt1 = L * (sqrt(pC) - sqrt(pL)) / sqrtPrecision
-		denom0 := safeMulDiv(sqrtPC, sqrtPU, sqrtPrecision*PRECISION)
+		denom0 := safeMulDiv(sqrtPC, sqrtPU, PRECISION)
 		if denom0 == 0 {
 			return 0, 0
 		}
 		amt0 := safeMulDiv(liq, sqrtPU-sqrtPC, denom0)
-		amt1 := safeMulDiv(liq, sqrtPC-sqrtPL, sqrtPrecision*PRECISION)
+		amt1 := safeMulDiv(liq, sqrtPC-sqrtPL, PRECISION)
 		return amt0, amt1
 	}
 }
@@ -234,39 +229,34 @@ func getAmountsForLiquidity(pL, pU, pC, liq int64) (int64, int64) {
 // getLiquidityForAmounts calculates liquidity from token amounts
 // Uses proper sqrt-based CLMM math (inverse of getAmountsForLiquidity)
 func getLiquidityForAmounts(pL, pU, pC, amt0, amt1 int64) int64 {
-	sqrtPrecision := int64(1000)
 	sqrtPL := isqrt(pL * PRECISION)
 	sqrtPU := isqrt(pU * PRECISION)
 	sqrtPC := isqrt(pC * PRECISION)
 
 	if pC <= pL {
 		// Price below range: use amt0 only
-		// L = amt0 * sqrt(pL) * sqrt(pU) / (sqrt(pU) - sqrt(pL))
 		if amt0 <= 0 || sqrtPU <= sqrtPL {
 			return 0
 		}
-		numerator := safeMulDiv(sqrtPL, sqrtPU, sqrtPrecision*PRECISION)
+		numerator := safeMulDiv(sqrtPL, sqrtPU, PRECISION)
 		return safeMulDiv(amt0, numerator, sqrtPU-sqrtPL)
 	} else if pC >= pU {
 		// Price above range: use amt1 only
-		// L = amt1 * sqrtPrecision / (sqrt(pU) - sqrt(pL))
 		if amt1 <= 0 || sqrtPU <= sqrtPL {
 			return 0
 		}
-		return safeMulDiv(amt1, sqrtPrecision*PRECISION, sqrtPU-sqrtPL)
+		return safeMulDiv(amt1, PRECISION, sqrtPU-sqrtPL)
 	} else {
 		// Price in range: use min of liquidity from both tokens
-		// L0 = amt0 * sqrt(pC) * sqrt(pU) / (sqrt(pU) - sqrt(pC))
-		// L1 = amt1 * sqrtPrecision / (sqrt(pC) - sqrt(pL))
 		var liq0, liq1 int64
 
 		if amt0 > 0 && sqrtPU > sqrtPC {
-			numerator0 := safeMulDiv(sqrtPC, sqrtPU, sqrtPrecision*PRECISION)
+			numerator0 := safeMulDiv(sqrtPC, sqrtPU, PRECISION)
 			liq0 = safeMulDiv(amt0, numerator0, sqrtPU-sqrtPC)
 		}
 
 		if amt1 > 0 && sqrtPC > sqrtPL {
-			liq1 = safeMulDiv(amt1, sqrtPrecision*PRECISION, sqrtPC-sqrtPL)
+			liq1 = safeMulDiv(amt1, PRECISION, sqrtPC-sqrtPL)
 		}
 
 		// Return minimum (or whichever is non-zero)
@@ -377,6 +367,31 @@ func MintPosition(_ realm, poolID uint64, tickLower, tickUpper int64) uint64 {
 	liquidity := getLiquidityForAmounts(pL, pU, pool.PriceX6, amountA, amountB)
 	if liquidity <= 0 {
 		panic("insufficient liquidity")
+	}
+
+	// Calculate actual amounts used based on liquidity
+	usedA, usedB := getAmountsForLiquidity(pL, pU, pool.PriceX6, liquidity)
+
+	// Refund any unused tokens
+	refundA := amountA - usedA
+	refundB := amountB - usedB
+
+	if refundA > 0 || refundB > 0 {
+		bnk := banker.NewBanker(banker.BankerTypeRealmSend)
+		realmAddr := runtime.CurrentRealm().Address()
+		callerAddr := runtime.OriginCaller()
+
+		if refundA > 0 && refundB > 0 {
+			coins := chain.NewCoins(
+				chain.NewCoin(pool.DenomA, refundA),
+				chain.NewCoin(pool.DenomB, refundB),
+			)
+			bnk.SendCoins(realmAddr, callerAddr, coins)
+		} else if refundA > 0 {
+			bnk.SendCoins(realmAddr, callerAddr, chain.NewCoins(chain.NewCoin(pool.DenomA, refundA)))
+		} else if refundB > 0 {
+			bnk.SendCoins(realmAddr, callerAddr, chain.NewCoins(chain.NewCoin(pool.DenomB, refundB)))
+		}
 	}
 
 	// Update ticks
