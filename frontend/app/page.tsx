@@ -985,7 +985,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.3</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.4</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1569,7 +1569,7 @@ export default function Home() {
                       <div className="grid grid-cols-2 gap-4 text-sm">
                         <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{formatPriceX6(pool.priceX6)}</p></div>
                         <div><p className="text-[#8b949e]">Current Tick</p><p className="font-medium">{pool.currentTick}</p></div>
-                        <div><p className="text-[#8b949e]">Active Liquidity</p><p className="font-medium">{fmtAmt(pool.liquidity, 2)}</p></div>
+                        <div><p className="text-[#8b949e]">Active Liquidity</p><p className="font-medium">{(Number(pool.liquidity) / 10_000).toFixed(2)}</p></div>
                         <div><p className="text-[#8b949e]">Tick Spacing</p><p className="font-medium">{pool.tickSpacing}</p></div>
                       </div>
                       <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm space-y-1">
