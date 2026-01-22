@@ -528,23 +528,22 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 
 			// Max amount in to reach next tick: dx = L * (1/sqrt(P_next) - 1/sqrt(P_current))
 			// Simplified: dx = L * (sqrt(P_current) - sqrt(P_next)) / (sqrt(P_current) * sqrt(P_next) / SQRT_PRECISION)
-			sqrtPrecision := int64(1000) // sqrt(PRECISION)
-			maxAmountIn := safeMulDiv(pool.Liquidity, sqrtPriceCurrent-sqrtPriceNext, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, sqrtPrecision*PRECISION))
+			// Max amount in to reach next tick
+			maxAmountIn := safeMulDiv(pool.Liquidity, sqrtPriceCurrent-sqrtPriceNext, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, PRECISION))
 
 			if amountRemaining <= maxAmountIn || maxAmountIn <= 0 {
 				// Swap completes within this tick range
 				amountInStep = amountRemaining
 
-				// Calculate new sqrt price: 1/sqrt(P_new) = 1/sqrt(P_old) + dx/L
-				// sqrt(P_new) = sqrt(P_old) * L / (L + dx * sqrt(P_old) / sqrtPrecision)
-				denom := pool.Liquidity + safeMulDiv(amountInStep, sqrtPriceCurrent, sqrtPrecision*PRECISION)
+				// Calculate new sqrt price: sqrt(P_new) = sqrt(P_old) * L / (L + dx * sqrt(P_old) / PRECISION)
+				denom := pool.Liquidity + safeMulDiv(amountInStep, sqrtPriceCurrent, PRECISION)
 				if denom <= 0 {
 					break
 				}
 				sqrtPriceNew := safeMulDiv(sqrtPriceCurrent, pool.Liquidity, denom)
 
-				// Output: dy = L * (sqrt(P_old) - sqrt(P_new)) / sqrtPrecision
-				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceCurrent-sqrtPriceNew, sqrtPrecision*PRECISION)
+				// Output: dy = L * (sqrt(P_old) - sqrt(P_new)) / PRECISION
+				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceCurrent-sqrtPriceNew, PRECISION)
 
 				// Update price
 				pool.PriceX6 = safeMulDiv(sqrtPriceNew, sqrtPriceNew, PRECISION)
@@ -556,7 +555,7 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 				amountInStep = maxAmountIn
 
 				// Output for crossing to next tick
-				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceCurrent-sqrtPriceNext, sqrtPrecision*PRECISION)
+				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceCurrent-sqrtPriceNext, PRECISION)
 				pool.PriceX6 = nextTickPrice
 
 				// Cross the tick - update liquidity
@@ -576,19 +575,17 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 				break
 			}
 
-			sqrtPrecision := int64(1000)
-			// Max amount in to reach next tick: dy = L * (sqrt(P_next) - sqrt(P_current)) / sqrtPrecision
-			maxAmountIn := safeMulDiv(pool.Liquidity, sqrtPriceNext-sqrtPriceCurrent, sqrtPrecision*PRECISION)
+			// Max amount in to reach next tick: dy = L * (sqrt(P_next) - sqrt(P_current)) / PRECISION
+			maxAmountIn := safeMulDiv(pool.Liquidity, sqrtPriceNext-sqrtPriceCurrent, PRECISION)
 
 			if amountRemaining <= maxAmountIn || maxAmountIn <= 0 {
 				amountInStep = amountRemaining
 
-				// New sqrt price: sqrt(P_new) = sqrt(P_old) + dy * sqrtPrecision / L
-				sqrtPriceNew := sqrtPriceCurrent + safeMulDiv(amountInStep, sqrtPrecision*PRECISION, pool.Liquidity)
+				// New sqrt price: sqrt(P_new) = sqrt(P_old) + dy * PRECISION / L
+				sqrtPriceNew := sqrtPriceCurrent + safeMulDiv(amountInStep, PRECISION, pool.Liquidity)
 
-				// Output: dx = L * (1/sqrt(P_old) - 1/sqrt(P_new))
-				// = L * (sqrt(P_new) - sqrt(P_old)) / (sqrt(P_old) * sqrt(P_new) / sqrtPrecision)
-				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceNew-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNew, sqrtPrecision*PRECISION))
+				// Output: dx = L * (sqrt(P_new) - sqrt(P_old)) / (sqrt(P_old) * sqrt(P_new) / PRECISION)
+				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceNew-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNew, PRECISION))
 
 				pool.PriceX6 = safeMulDiv(sqrtPriceNew, sqrtPriceNew, PRECISION)
 				if pool.PriceX6 > getPriceAtTick(MAX_TICK) {
@@ -596,7 +593,7 @@ func Swap(_ realm, poolID uint64, tokenIn string, minAmountOut int64) int64 {
 				}
 			} else {
 				amountInStep = maxAmountIn
-				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceNext-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, sqrtPrecision*PRECISION))
+				amountOutStep = safeMulDiv(pool.Liquidity, sqrtPriceNext-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, PRECISION))
 				pool.PriceX6 = nextTickPrice
 
 				crossTick(poolID, nextTick, zeroForOne)
@@ -888,7 +885,6 @@ func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 	totalAmountOut := int64(0)
 
 	// Simulate swap with tick crossing using sqrt-based CLMM math
-	sqrtPrecision := int64(1000) // sqrt(PRECISION)
 	maxIterations := 100
 	for i := 0; i < maxIterations && amountRemaining > 0; i++ {
 		if simLiquidity == 0 {
@@ -913,23 +909,23 @@ func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 				break
 			}
 
-			maxAmountIn := safeMulDiv(simLiquidity, sqrtPriceCurrent-sqrtPriceNext, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, sqrtPrecision*PRECISION))
+			maxAmountIn := safeMulDiv(simLiquidity, sqrtPriceCurrent-sqrtPriceNext, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, PRECISION))
 
 			if amountRemaining <= maxAmountIn || maxAmountIn <= 0 {
 				amountInStep = amountRemaining
-				denom := simLiquidity + safeMulDiv(amountInStep, sqrtPriceCurrent, sqrtPrecision*PRECISION)
+				denom := simLiquidity + safeMulDiv(amountInStep, sqrtPriceCurrent, PRECISION)
 				if denom <= 0 {
 					break
 				}
 				sqrtPriceNew := safeMulDiv(sqrtPriceCurrent, simLiquidity, denom)
-				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceCurrent-sqrtPriceNew, sqrtPrecision*PRECISION)
+				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceCurrent-sqrtPriceNew, PRECISION)
 				simPriceX6 = safeMulDiv(sqrtPriceNew, sqrtPriceNew, PRECISION)
 				if simPriceX6 < getPriceAtTick(MIN_TICK) {
 					simPriceX6 = getPriceAtTick(MIN_TICK)
 				}
 			} else {
 				amountInStep = maxAmountIn
-				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceCurrent-sqrtPriceNext, sqrtPrecision*PRECISION)
+				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceCurrent-sqrtPriceNext, PRECISION)
 				simPriceX6 = nextTickPrice
 
 				ticks := tickData[poolID]
@@ -954,19 +950,19 @@ func GetQuote(poolID uint64, tokenIn string, amountIn int64) int64 {
 				break
 			}
 
-			maxAmountIn := safeMulDiv(simLiquidity, sqrtPriceNext-sqrtPriceCurrent, sqrtPrecision*PRECISION)
+			maxAmountIn := safeMulDiv(simLiquidity, sqrtPriceNext-sqrtPriceCurrent, PRECISION)
 
 			if amountRemaining <= maxAmountIn || maxAmountIn <= 0 {
 				amountInStep = amountRemaining
-				sqrtPriceNew := sqrtPriceCurrent + safeMulDiv(amountInStep, sqrtPrecision*PRECISION, simLiquidity)
-				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceNew-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNew, sqrtPrecision*PRECISION))
+				sqrtPriceNew := sqrtPriceCurrent + safeMulDiv(amountInStep, PRECISION, simLiquidity)
+				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceNew-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNew, PRECISION))
 				simPriceX6 = safeMulDiv(sqrtPriceNew, sqrtPriceNew, PRECISION)
 				if simPriceX6 > getPriceAtTick(MAX_TICK) {
 					simPriceX6 = getPriceAtTick(MAX_TICK)
 				}
 			} else {
 				amountInStep = maxAmountIn
-				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceNext-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, sqrtPrecision*PRECISION))
+				amountOutStep = safeMulDiv(simLiquidity, sqrtPriceNext-sqrtPriceCurrent, safeMulDiv(sqrtPriceCurrent, sqrtPriceNext, PRECISION))
 				simPriceX6 = nextTickPrice
 
 				ticks := tickData[poolID]
