@@ -996,7 +996,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.5</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.8.6</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1640,7 +1640,8 @@ export default function Home() {
                     const pL = tickToPrice(pos.tickLower)
                     const pU = tickToPrice(pos.tickUpper)
                     const pC = Number(pool.priceX6) / 1_000_000
-                    const liq = Number(pos.liquidity)
+                    // Scale liquidity first (same as pools display)
+                    const liq = Number(pos.liquidity) / 10_000
                     const sqrtPL = Math.sqrt(pL)
                     const sqrtPU = Math.sqrt(pU)
                     const sqrtPC = Math.sqrt(pC)
@@ -1672,7 +1673,7 @@ export default function Home() {
                           </Tooltip>
                         </div>
                         <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div><p className="text-[#8b949e]">Liquidity</p><p className="font-medium">{pos.liquidity.toString()}</p></div>
+                          <div><p className="text-[#8b949e]">Total Tokens</p><p className="font-medium">~{(Number(pos.liquidity) / 10_000 * 2).toFixed(0)}</p></div>
                           <div><p className="text-[#8b949e]">Current Price</p><p className="font-medium">{pC.toFixed(4)}</p></div>
                         </div>
                         {/* Range Visualization */}
@@ -1714,15 +1715,15 @@ export default function Home() {
                           </div>
                         </div>
                         <div className="mt-3 pt-3 border-t border-[#21262d] grid grid-cols-2 gap-4 text-sm">
-                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomA)} Amount</p><p className="font-medium text-[#238636]">{amountA > 0 ? (amountA / 10_000).toFixed(4) : '0'}</p></div>
-                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomB)} Amount</p><p className="font-medium text-[#238636]">{amountB > 0 ? (amountB / 10_000).toFixed(4) : '0'}</p></div>
+                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomA)} Amount</p><p className="font-medium text-[#238636]">{amountA > 0 ? amountA.toFixed(2) : '0'}</p></div>
+                          <div><p className="text-[#8b949e]">{formatCLMMDenom(pool.denomB)} Amount</p><p className="font-medium text-[#238636]">{amountB > 0 ? amountB.toFixed(2) : '0'}</p></div>
                         </div>
                         <div className="mt-2 p-2 bg-[#21262d] rounded-lg text-sm">
                           <div className="flex justify-between">
                             <span className="text-[#8b949e]">Position Value</span>
                             <span className="font-medium text-[#238636]">
-                              {/* Show value - adjusted for precision factors (10_000x) */}
-                              ~{((amountA / 10_000) + (amountB / 10_000) / pC).toFixed(2)} {formatCLMMDenom(pool.denomA)}
+                              {/* Show value - liq already scaled by 10_000 */}
+                              ~{(amountA + amountB / pC).toFixed(2)} {formatCLMMDenom(pool.denomA)}
                             </span>
                           </div>
                         </div>
