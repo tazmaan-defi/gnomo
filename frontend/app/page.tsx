@@ -1890,7 +1890,7 @@ export default function Home() {
                             <span className="text-xs text-[#484f58]">tick</span>
                             <div className="flex items-center gap-1">
                               <button onClick={() => { const newTick = mintTickLower - selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">−</button>
-                              <input type="number" value={mintTickLower} onChange={(e) => { const tick = parseInt(e.target.value) || 0; const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned); setMintPriceLower(tickToPrice(aligned).toFixed(4)) }} className="w-16 bg-[#21262d] rounded px-1 py-0.5 text-xs text-center outline-none" />
+                              <input type="text" value={mintTickLower} onChange={(e) => { const val = e.target.value; if (val === '' || val === '-') { setMintTickLower(val as any); return }; const tick = parseInt(val); if (!isNaN(tick)) { setMintTickLower(tick); setMintPriceLower(tickToPrice(tick).toFixed(4)) } }} onBlur={() => { const tick = typeof mintTickLower === 'number' ? mintTickLower : parseInt(String(mintTickLower)) || 0; const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickLower(aligned); setMintPriceLower(tickToPrice(aligned).toFixed(4)) }} className="w-16 bg-[#21262d] rounded px-1 py-0.5 text-xs text-center outline-none" />
                               <button onClick={() => { const newTick = mintTickLower + selectedClmmPool.tickSpacing; setMintTickLower(newTick); setMintPriceLower(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">+</button>
                             </div>
                           </div>
@@ -1911,7 +1911,7 @@ export default function Home() {
                             <span className="text-xs text-[#484f58]">tick</span>
                             <div className="flex items-center gap-1">
                               <button onClick={() => { const newTick = mintTickUpper - selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">−</button>
-                              <input type="number" value={mintTickUpper} onChange={(e) => { const tick = parseInt(e.target.value) || 0; const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned); setMintPriceUpper(tickToPrice(aligned).toFixed(4)) }} className="w-16 bg-[#21262d] rounded px-1 py-0.5 text-xs text-center outline-none" />
+                              <input type="text" value={mintTickUpper} onChange={(e) => { const val = e.target.value; if (val === '' || val === '-') { setMintTickUpper(val as any); return }; const tick = parseInt(val); if (!isNaN(tick)) { setMintTickUpper(tick); setMintPriceUpper(tickToPrice(tick).toFixed(4)) } }} onBlur={() => { const tick = typeof mintTickUpper === 'number' ? mintTickUpper : parseInt(String(mintTickUpper)) || 0; const aligned = Math.round(tick / selectedClmmPool.tickSpacing) * selectedClmmPool.tickSpacing; setMintTickUpper(aligned); setMintPriceUpper(tickToPrice(aligned).toFixed(4)) }} className="w-16 bg-[#21262d] rounded px-1 py-0.5 text-xs text-center outline-none" />
                               <button onClick={() => { const newTick = mintTickUpper + selectedClmmPool.tickSpacing; setMintTickUpper(newTick); setMintPriceUpper(tickToPrice(newTick).toFixed(4)) }} className="p-0.5 bg-[#21262d] hover:bg-[#30363d] rounded text-[#8b949e] hover:text-white transition text-xs">+</button>
                             </div>
                           </div>
@@ -2092,12 +2092,16 @@ export default function Home() {
                     const amtA = parseFloat(mintAmountA) || 0
                     const amtB = parseFloat(mintAmountB) || 0
                     const exceedsBalance = amtA > balA || amtB > balB
-                    // Check if range requires both tokens
+                    // Check if range requires both tokens (same logic as display)
                     const currentPrice = Number(selectedClmmPool.priceX6) / 1_000_000
                     const pL = parseFloat(mintPriceLower) || 0
                     const pU = parseFloat(mintPriceUpper) || 0
-                    const needsA = currentPrice < pU
-                    const needsB = currentPrice > pL
+                    let needsA = true, needsB = true
+                    if (currentPrice <= pL) {
+                      needsA = false // Range above current price: provide only B
+                    } else if (currentPrice >= pU) {
+                      needsB = false // Range below current price: provide only A
+                    }
                     const missingRequired = (needsA && amtA <= 0) || (needsB && amtB <= 0)
                     const isDisabled = !walletAddress || missingRequired || clmmLoading || exceedsBalance
                     return (
