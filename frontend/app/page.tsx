@@ -1924,8 +1924,8 @@ export default function Home() {
                             const currentPrice = Number(selectedClmmPool.priceX6) / 1_000_000
                             const pL = parseFloat(mintPriceLower) || 0
                             const pU = parseFloat(mintPriceUpper) || 0
-                            if (pU <= currentPrice) return <span className="text-[#f0883e]">Range below current price: provide only {formatCLMMDenom(selectedClmmPool.denomA)}</span>
-                            if (pL >= currentPrice) return <span className="text-[#f0883e]">Range above current price: provide only {formatCLMMDenom(selectedClmmPool.denomB)}</span>
+                            if (pL >= currentPrice) return <span className="text-[#f0883e]">Range above current price: provide only {formatCLMMDenom(selectedClmmPool.denomA)}</span>
+                            if (pU <= currentPrice) return <span className="text-[#f0883e]">Range below current price: provide only {formatCLMMDenom(selectedClmmPool.denomB)}</span>
                             return <span className="text-[#238636]">Range spans current price: provide both tokens</span>
                           })()}
                         </div>
@@ -1936,11 +1936,12 @@ export default function Home() {
                         const pU = parseFloat(mintPriceUpper) || 0
 
                         // Determine which tokens are needed based on range
+                        // CLMM: when price below range, use token0 (A); when price above range, use token1 (B)
                         let needsA = true, needsB = true
                         if (currentPrice <= pL) {
-                          needsA = false // All in token B (above current price)
+                          needsB = false // Price below range: provide only A (token0)
                         } else if (currentPrice >= pU) {
-                          needsB = false // All in token A (below current price)
+                          needsA = false // Price above range: provide only B (token1)
                         }
 
                         // Calculate ratio for splitting when in range
@@ -2093,14 +2094,15 @@ export default function Home() {
                     const amtB = parseFloat(mintAmountB) || 0
                     const exceedsBalance = amtA > balA || amtB > balB
                     // Check if range requires both tokens (same logic as display)
+                    // CLMM: when price below range, use token0 (A); when price above range, use token1 (B)
                     const currentPrice = Number(selectedClmmPool.priceX6) / 1_000_000
                     const pL = parseFloat(mintPriceLower) || 0
                     const pU = parseFloat(mintPriceUpper) || 0
                     let needsA = true, needsB = true
                     if (currentPrice <= pL) {
-                      needsA = false // Range above current price: provide only B
+                      needsB = false // Price below range: provide only A (token0)
                     } else if (currentPrice >= pU) {
-                      needsB = false // Range below current price: provide only A
+                      needsA = false // Price above range: provide only B (token1)
                     }
                     const missingRequired = (needsA && amtA <= 0) || (needsB && amtB <= 0)
                     const isDisabled = !walletAddress || missingRequired || clmmLoading || exceedsBalance
