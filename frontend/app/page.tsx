@@ -436,7 +436,10 @@ export default function Home() {
         const tokenIn: 'A' | 'B' = pool.denomA === fromToken ? 'A' : 'B'
         try {
           const quote = await getQuote(pool.id, tokenIn, amountIn)
-          console.log(`[Router] V2 pool ${pool.id} (${pool.feeBps/100}%): quote=${quote.toString()} for input=${amountIn.toString()}`)
+          const v2Price = tokenIn === 'A'
+            ? Number(pool.reserveB) / Number(pool.reserveA)
+            : Number(pool.reserveA) / Number(pool.reserveB)
+          console.log(`[Router] V2 pool ${pool.id} (${pool.feeBps/100}%): quote=${quote.toString()} for input=${amountIn.toString()}, price=${v2Price.toFixed(6)}, reserves=${pool.reserveA.toString()}/${pool.reserveB.toString()}`)
           if (quote > 0n && (!best || quote > best.amountOut)) {
             best = { pool, clmmPool: null, poolType: 'v2', amountOut: quote, tokenIn }
           }
@@ -462,7 +465,8 @@ export default function Home() {
         const tokenIn: 'A' | 'B' = isAtoB ? 'A' : 'B'
         try {
           const quote = await getCLMMQuote(clmmPool.id, tokenIn, amountIn)
-          console.log(`[Router] CLMM pool ${clmmPool.id} (${clmmPool.feeBPS/100}%): quote=${quote.toString()} for input=${amountIn.toString()}, liq=${clmmPool.liquidity.toString()}`)
+          const priceDisplay = Number(clmmPool.priceX6) / 1_000_000
+          console.log(`[Router] CLMM pool ${clmmPool.id} (${clmmPool.feeBPS/100}%): quote=${quote.toString()} for input=${amountIn.toString()}, liq=${clmmPool.liquidity.toString()}, price=${priceDisplay.toFixed(6)}, tick=${clmmPool.currentTick}`)
           if (quote > 0n && (!best || quote > best.amountOut)) {
             best = { pool: null, clmmPool, poolType: 'clmm', amountOut: quote, tokenIn }
           }
@@ -1021,7 +1025,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.0</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.1</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
