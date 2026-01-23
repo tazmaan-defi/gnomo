@@ -1035,7 +1035,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.5</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.6</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1443,9 +1443,9 @@ export default function Home() {
                   <select value={selectedPoolId} onChange={(e) => { setSelectedPoolId(parseInt(e.target.value)); setAmountA(''); setAmountB('') }} className="w-full bg-[#0d1117] border border-[#30363d] rounded-xl px-3 py-3 text-white">
                     {pools.map((pool) => <option key={pool.id} value={pool.id}>{formatDenom(pool.denomA)}/{formatDenom(pool.denomB)} ({fmtFee(pool.feeBps)}%) - Pool #{pool.id}</option>)}
                   </select>
-                  <div className="bg-[#0d1117] rounded-xl p-4">
+                  <div className={`bg-[#0d1117] rounded-xl p-4 ${(parseFloat(amountB) > 0 && (parseFloat(amountA) || 0) <= 0) ? 'border border-red-500' : ''}`}>
                     <div className="flex justify-between mb-2"><span className="text-[#8b949e]">{formatDenom(selectedPool.denomA)}</span><span className="text-sm text-[#8b949e]">Balance: {formatBalance(selectedPool.denomA)}</span></div>
-                    <input type="text" value={amountA} onChange={(e) => { setLastEditedField('A'); setAmountA(e.target.value) }} placeholder="0.00" className="w-full bg-transparent text-2xl font-medium outline-none" />
+                    <input type="text" value={amountA} onChange={(e) => { setLastEditedField('A'); setAmountA(e.target.value) }} placeholder="0.00" className={`w-full bg-transparent text-2xl font-medium outline-none ${(parseFloat(amountB) > 0 && (parseFloat(amountA) || 0) <= 0) ? 'text-red-500' : ''}`} />
                     <div className="flex gap-2 mt-2">
                       {[25, 50, 75, 100].map((pct) => {
                         const bal = balances.get(selectedPool.denomA) || 0n
@@ -1466,9 +1466,9 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="flex justify-center"><div className="bg-[#21262d] p-2 rounded-xl"><PlusIcon /></div></div>
-                  <div className="bg-[#0d1117] rounded-xl p-4">
+                  <div className={`bg-[#0d1117] rounded-xl p-4 ${(parseFloat(amountA) > 0 && (parseFloat(amountB) || 0) <= 0) ? 'border border-red-500' : ''}`}>
                     <div className="flex justify-between mb-2"><span className="text-[#8b949e]">{formatDenom(selectedPool.denomB)}</span><span className="text-sm text-[#8b949e]">Balance: {formatBalance(selectedPool.denomB)}</span></div>
-                    <input type="text" value={amountB} onChange={(e) => { setLastEditedField('B'); setAmountB(e.target.value) }} placeholder="0.00" className="w-full bg-transparent text-2xl font-medium outline-none" />
+                    <input type="text" value={amountB} onChange={(e) => { setLastEditedField('B'); setAmountB(e.target.value) }} placeholder="0.00" className={`w-full bg-transparent text-2xl font-medium outline-none ${(parseFloat(amountA) > 0 && (parseFloat(amountB) || 0) <= 0) ? 'text-red-500' : ''}`} />
                     <div className="flex gap-2 mt-2">
                       {[25, 50, 75, 100].map((pct) => {
                         const bal = balances.get(selectedPool.denomB) || 0n
@@ -1976,7 +1976,7 @@ export default function Home() {
 
                         return (
                           <>
-                            <div className="bg-[#0d1117] rounded-xl p-4">
+                            <div className={`bg-[#0d1117] rounded-xl p-4 ${needsA && (parseFloat(mintAmountA) || 0) <= 0 ? 'border border-red-500' : ''}`}>
                               <div className="flex justify-between mb-2">
                                 <span className="text-[#8b949e]">{formatCLMMDenom(selectedClmmPool.denomA)} {!needsA && <span className="text-xs text-[#f0883e]">(not needed)</span>}</span>
                                 <span className="text-sm text-[#8b949e]">Balance: {formatBalance(selectedClmmPool.denomA)}</span>
@@ -1994,7 +1994,7 @@ export default function Home() {
                                   }
                                 }}
                                 placeholder="0.00"
-                                className={`w-full bg-transparent text-2xl font-medium outline-none ${!needsA ? 'text-[#484f58]' : ''}`}
+                                className={`w-full bg-transparent text-2xl font-medium outline-none ${!needsA ? 'text-[#484f58]' : needsA && (parseFloat(mintAmountA) || 0) <= 0 ? 'text-red-500' : ''}`}
                                 disabled={!needsA}
                               />
                               {needsA && (
@@ -2023,7 +2023,7 @@ export default function Home() {
                                 </div>
                               )}
                             </div>
-                            <div className="bg-[#0d1117] rounded-xl p-4">
+                            <div className={`bg-[#0d1117] rounded-xl p-4 ${needsB && (parseFloat(mintAmountB) || 0) <= 0 ? 'border border-red-500' : ''}`}>
                               <div className="flex justify-between mb-2">
                                 <span className="text-[#8b949e]">{formatCLMMDenom(selectedClmmPool.denomB)} {!needsB && <span className="text-xs text-[#f0883e]">(not needed)</span>}</span>
                                 <span className="text-sm text-[#8b949e]">Balance: {formatBalance(selectedClmmPool.denomB)}</span>
@@ -2041,7 +2041,7 @@ export default function Home() {
                                   }
                                 }}
                                 placeholder="0.00"
-                                className={`w-full bg-transparent text-2xl font-medium outline-none ${!needsB ? 'text-[#484f58]' : ''}`}
+                                className={`w-full bg-transparent text-2xl font-medium outline-none ${!needsB ? 'text-[#484f58]' : needsB && (parseFloat(mintAmountB) || 0) <= 0 ? 'text-red-500' : ''}`}
                                 disabled={!needsB}
                               />
                               {needsB && (
