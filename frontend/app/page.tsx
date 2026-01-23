@@ -713,14 +713,19 @@ export default function Home() {
       } else if (selectedPool.reserveA > 0n && selectedPool.reserveB > 0n) {
         // Pool has reserves - calculate based on existing ratio
         const amtA = parseFloat(amountA) * 1_000_000
-        const amtB = (amtA * Number(selectedPool.reserveB)) / Number(selectedPool.reserveA)
+        let amtB = (amtA * Number(selectedPool.reserveB)) / Number(selectedPool.reserveA)
+        // Cap at wallet balance for token B
+        const balB = Number(balances.get(selectedPool.denomB) || 0n)
+        if (amtB > balB) {
+          amtB = balB
+        }
         setAmountB((amtB / 1_000_000).toFixed(6))
       } else {
         // New pool with no reserves - default to 1:1 ratio
         setAmountB(amountA)
       }
     }
-  }, [amountA, selectedPool, activePoolTab, lastEditedField])
+  }, [amountA, selectedPool, activePoolTab, lastEditedField, balances])
 
   useEffect(() => {
     if (selectedPool && activePoolTab === 'add' && lastEditedField === 'B') {
@@ -729,14 +734,19 @@ export default function Home() {
       } else if (selectedPool.reserveA > 0n && selectedPool.reserveB > 0n) {
         // Pool has reserves - calculate based on existing ratio
         const amtB = parseFloat(amountB) * 1_000_000
-        const amtA = (amtB * Number(selectedPool.reserveA)) / Number(selectedPool.reserveB)
+        let amtA = (amtB * Number(selectedPool.reserveA)) / Number(selectedPool.reserveB)
+        // Cap at wallet balance for token A
+        const balA = Number(balances.get(selectedPool.denomA) || 0n)
+        if (amtA > balA) {
+          amtA = balA
+        }
         setAmountA((amtA / 1_000_000).toFixed(6))
       } else {
         // New pool with no reserves - default to 1:1 ratio
         setAmountA(amountB)
       }
     }
-  }, [amountB, selectedPool, activePoolTab, lastEditedField])
+  }, [amountB, selectedPool, activePoolTab, lastEditedField, balances])
 
   const handlePercentClick = (value: number) => {
     setSelectedPercent(value)
@@ -1025,7 +1035,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.2</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.3</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1482,9 +1492,19 @@ export default function Home() {
                     <div className="flex justify-between text-[#8b949e]"><span>Current Price</span><span>1 {formatDenom(selectedPool.denomA)} = {calcPrice(selectedPool.reserveA, selectedPool.reserveB)} {formatDenom(selectedPool.denomB)}</span></div>
                     <div className="flex justify-between text-[#8b949e]"><span>Your Current LP</span><span>{fmtAmt(userLpBalance)}</span></div>
                   </div>
-                  <button onClick={handleAddLiquidity} disabled={!walletAddress || !amountA || !amountB || actionLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && amountA && amountB && !actionLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
-                    {actionLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Adding...</span> : !walletAddress ? 'Connect Wallet' : 'Add Liquidity'}
-                  </button>
+                  {(() => {
+                    const balA = Number(balances.get(selectedPool.denomA) || 0n) / 1_000_000
+                    const balB = Number(balances.get(selectedPool.denomB) || 0n) / 1_000_000
+                    const amtA = parseFloat(amountA) || 0
+                    const amtB = parseFloat(amountB) || 0
+                    const exceedsBalance = amtA > balA || amtB > balB
+                    const isDisabled = !walletAddress || !amountA || !amountB || actionLoading || exceedsBalance
+                    return (
+                      <button onClick={handleAddLiquidity} disabled={isDisabled} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${!isDisabled ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
+                        {actionLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Adding...</span> : !walletAddress ? 'Connect Wallet' : exceedsBalance ? 'Insufficient Balance' : 'Add Liquidity'}
+                      </button>
+                    )
+                  })()}
                 </div>
               )}
 
