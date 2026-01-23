@@ -1035,7 +1035,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.4</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.5</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1498,10 +1498,11 @@ export default function Home() {
                     const amtA = parseFloat(amountA) || 0
                     const amtB = parseFloat(amountB) || 0
                     const exceedsBalance = amtA > balA || amtB > balB
-                    const isDisabled = !walletAddress || !amountA || !amountB || actionLoading || exceedsBalance
+                    const needsBothTokens = amtA <= 0 || amtB <= 0
+                    const isDisabled = !walletAddress || needsBothTokens || actionLoading || exceedsBalance
                     return (
                       <button onClick={handleAddLiquidity} disabled={isDisabled} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${!isDisabled ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
-                        {actionLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Adding...</span> : !walletAddress ? 'Connect Wallet' : exceedsBalance ? 'Insufficient Balance' : 'Add Liquidity'}
+                        {actionLoading ? <span className="flex items-center justify-center gap-2"><span className="animate-spin w-5 h-5 border-2 border-white border-t-transparent rounded-full" />Adding...</span> : !walletAddress ? 'Connect Wallet' : exceedsBalance ? 'Insufficient Balance' : needsBothTokens ? 'Enter Both Amounts' : 'Add Liquidity'}
                       </button>
                     )
                   })()}
@@ -2091,10 +2092,17 @@ export default function Home() {
                     const amtA = parseFloat(mintAmountA) || 0
                     const amtB = parseFloat(mintAmountB) || 0
                     const exceedsBalance = amtA > balA || amtB > balB
-                    const isDisabled = !walletAddress || !mintAmountA || !mintAmountB || clmmLoading || exceedsBalance
+                    // Check if range requires both tokens
+                    const currentPrice = Number(selectedClmmPool.priceX6) / 1_000_000
+                    const pL = parseFloat(mintPriceLower) || 0
+                    const pU = parseFloat(mintPriceUpper) || 0
+                    const needsA = currentPrice < pU
+                    const needsB = currentPrice > pL
+                    const missingRequired = (needsA && amtA <= 0) || (needsB && amtB <= 0)
+                    const isDisabled = !walletAddress || missingRequired || clmmLoading || exceedsBalance
                     return (
                       <button onClick={handleMintPosition} disabled={isDisabled} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${!isDisabled ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
-                        {clmmLoading ? 'Creating Position...' : !walletAddress ? 'Connect Wallet' : exceedsBalance ? 'Insufficient Balance' : 'Create Position'}
+                        {clmmLoading ? 'Creating Position...' : !walletAddress ? 'Connect Wallet' : exceedsBalance ? 'Insufficient Balance' : missingRequired ? 'Enter Required Amounts' : 'Create Position'}
                       </button>
                     )
                   })()}
