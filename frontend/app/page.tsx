@@ -1035,7 +1035,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.3</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.4</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -2007,7 +2007,10 @@ export default function Home() {
                                           const amt = Number(bal) * pct / 100 / 1_000_000
                                           setMintAmountA(amt.toFixed(6))
                                           if (needsB) {
-                                            setMintAmountB(calcAmountB(amt).toFixed(6))
+                                            let calcB = calcAmountB(amt)
+                                            const balB = Number(balances.get(selectedClmmPool.denomB) || 0n) / 1_000_000
+                                            if (calcB > balB) calcB = balB
+                                            setMintAmountB(calcB.toFixed(6))
                                           }
                                         }}
                                         className="px-2 py-1 text-xs bg-[#21262d] text-[#8b949e] hover:text-white rounded transition"
@@ -2051,7 +2054,10 @@ export default function Home() {
                                           const amt = Number(bal) * pct / 100 / 1_000_000
                                           setMintAmountB(amt.toFixed(6))
                                           if (needsA) {
-                                            setMintAmountA(calcAmountA(amt).toFixed(6))
+                                            let calcA = calcAmountA(amt)
+                                            const balA = Number(balances.get(selectedClmmPool.denomA) || 0n) / 1_000_000
+                                            if (calcA > balA) calcA = balA
+                                            setMintAmountA(calcA.toFixed(6))
                                           }
                                         }}
                                         className="px-2 py-1 text-xs bg-[#21262d] text-[#8b949e] hover:text-white rounded transition"
@@ -2078,7 +2084,20 @@ export default function Home() {
                       })()}
                     </>
                   )}
-                  <button onClick={handleMintPosition} disabled={!walletAddress || !selectedClmmPool || !mintAmountA || !mintAmountB || clmmLoading} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${walletAddress && selectedClmmPool && mintAmountA && mintAmountB && !clmmLoading ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>{clmmLoading ? 'Creating Position...' : 'Create Position'}</button>
+                  {(() => {
+                    if (!selectedClmmPool) return <button disabled className="w-full py-4 rounded-xl font-semibold text-lg bg-[#21262d] text-[#8b949e] cursor-not-allowed">Select Pool</button>
+                    const balA = Number(balances.get(selectedClmmPool.denomA) || 0n) / 1_000_000
+                    const balB = Number(balances.get(selectedClmmPool.denomB) || 0n) / 1_000_000
+                    const amtA = parseFloat(mintAmountA) || 0
+                    const amtB = parseFloat(mintAmountB) || 0
+                    const exceedsBalance = amtA > balA || amtB > balB
+                    const isDisabled = !walletAddress || !mintAmountA || !mintAmountB || clmmLoading || exceedsBalance
+                    return (
+                      <button onClick={handleMintPosition} disabled={isDisabled} className={`w-full py-4 rounded-xl font-semibold text-lg transition ${!isDisabled ? 'bg-[#238636] hover:bg-[#2ea043] text-white' : 'bg-[#21262d] text-[#8b949e] cursor-not-allowed'}`}>
+                        {clmmLoading ? 'Creating Position...' : !walletAddress ? 'Connect Wallet' : exceedsBalance ? 'Insufficient Balance' : 'Create Position'}
+                      </button>
+                    )
+                  })()}
                 </div>
               )}
             </div>
