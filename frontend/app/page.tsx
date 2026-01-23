@@ -1038,7 +1038,7 @@ export default function Home() {
       <header className="border-b border-[#21262d] bg-[#161b22]">
         <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-8">
-            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.11</span></h1>
+            <h1 className="text-xl font-bold text-[#238636]">Gnomo DEX <span className="text-xs font-normal text-[#8b949e]">v0.9.12</span></h1>
             <nav className="flex gap-1">
               {(['swap', 'pool', 'clmm'] as const).map((tab) => (
                 <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-lg font-medium transition capitalize ${activeTab === tab ? 'bg-[#238636] text-white' : 'text-[#8b949e] hover:text-white hover:bg-[#21262d]'}`}>{tab}</button>
@@ -1668,15 +1668,15 @@ export default function Home() {
                             <>
                               <div className="flex justify-between text-xs mb-1">
                                 <span className="text-[#8b949e]">Total Tokens</span>
-                                <span>~{totalTokens.toFixed(0)}</span>
+                                <span>{totalTokens.toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between text-xs">
-                                <span className="text-[#8b949e]">Est. {formatDenom(pool.denomA)}</span>
-                                <span>~{totalA.toFixed(2)}</span>
+                                <span className="text-[#8b949e]">{formatDenom(pool.denomA)}</span>
+                                <span>{totalA.toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between text-xs">
-                                <span className="text-[#8b949e]">Est. {formatDenom(pool.denomB)}</span>
-                                <span>~{totalB.toFixed(2)}</span>
+                                <span className="text-[#8b949e]">{formatDenom(pool.denomB)}</span>
+                                <span>{totalB.toFixed(2)}</span>
                               </div>
                               <div className="flex justify-between pt-1 border-t border-[#30363d]">
                                 <span className="text-[#8b949e]">TVL</span>
@@ -1761,39 +1761,28 @@ export default function Home() {
                             <span className="text-[#58a6ff]">Current: {pC.toFixed(4)}</span>
                             <span>{pU.toFixed(4)}</span>
                           </div>
-                          {/* Container with padding for out-of-range markers */}
-                          <div className="relative px-4">
-                            {/* The actual range bar */}
-                            <div className="relative h-3 bg-[#0d1117] rounded-full overflow-hidden">
+                          <div className="relative h-3 flex items-center">
+                            {/* Out-of-range left arrow */}
+                            {pC < pL && <span className="text-[#f85149] text-xs mr-1">◀</span>}
+                            {/* The range bar */}
+                            <div className="relative flex-1 h-3 bg-[#0d1117] rounded-full overflow-hidden">
                               <div className={`absolute h-full ${inRange ? 'bg-[#238636]' : 'bg-[#f85149]'} opacity-60`} style={{ left: '0%', right: '0%' }} />
+                              {/* Current price marker - only show inside bar when in range */}
+                              {inRange && (() => {
+                                const logPL = Math.log(pL)
+                                const logPU = Math.log(pU)
+                                const logPC = Math.log(pC)
+                                const rangeWidth = logPU - logPL
+                                const position = Math.max(0, Math.min(100, ((logPC - logPL) / rangeWidth) * 100))
+                                return (
+                                  <div className="absolute top-0 h-full w-0.5 bg-white" style={{ left: `${position}%`, transform: 'translateX(-50%)' }}>
+                                    <div className="absolute -top-0.5 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-white" />
+                                  </div>
+                                )
+                              })()}
                             </div>
-                            {/* Current price marker - positioned relative to padded container */}
-                            {(() => {
-                              const logPL = Math.log(pL)
-                              const logPU = Math.log(pU)
-                              const logPC = Math.log(pC)
-                              const rangeWidth = logPU - logPL
-                              let position = ((logPC - logPL) / rangeWidth) * 100
-                              const isOutLeft = pC < pL
-                              const isOutRight = pC >= pU
-                              // Map position: 0-100% of bar becomes ~14%-86% of container (due to px-4 padding)
-                              // For out of range, show at -10% or 110%
-                              let markerPos = isOutLeft ? -8 : isOutRight ? 108 : (position * 0.72 + 14)
-                              return (
-                                <div
-                                  className="absolute top-0 h-3 w-0.5 flex flex-col items-center"
-                                  style={{ left: `${markerPos}%`, transform: 'translateX(-50%)' }}
-                                >
-                                  <div className={`w-0.5 h-full ${inRange ? 'bg-white' : 'bg-[#f85149]'}`} />
-                                  <div className={`-mt-1 w-2 h-2 rounded-full ${inRange ? 'bg-white' : 'bg-[#f85149]'}`} />
-                                  {!inRange && (
-                                    <div className="text-[10px] text-[#f85149] mt-0.5 whitespace-nowrap">
-                                      {isOutLeft ? '◀ Below' : 'Above ▶'}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })()}
+                            {/* Out-of-range right arrow */}
+                            {pC >= pU && <span className="text-[#f85149] text-xs ml-1">▶</span>}
                           </div>
                           <div className="flex justify-between text-xs mt-1">
                             <span className="text-[#8b949e]">Min Price</span>
